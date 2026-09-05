@@ -50,7 +50,7 @@ jobs:
           {
             echo "task=${TASK}"
             echo "variant=${V}"
-            echo "stamp=v1.5.0"
+            echo "stamp=v1.6.0"
           } >> "$GITHUB_OUTPUT"
 
       - name: Write Gradle variant properties
@@ -179,15 +179,19 @@ jobs:
           
           📱 Install the APK on any ARM64 Android 7.0+ device. No root required.
           
-          ### v1.5.0
-          - 🧭 **100% native dashboard (no WebView)** — Kotlin views only, with smooth animated transitions between home, terminals and web UIs
-          - ⌨️ **Real Termux inside** — every service opens a genuine POSIX PTY shell via Termux terminal-emulator (real bash, real signals, resizing, soft keyboard)
-          - 📊 Per-service cards: live status, version, port or `CLI` badge (CLI agents like `dsh` and `claw` are on-demand commands, not port listeners — only servers bind ports)
-          - 🚀 Auto-update terminal: upstream banner → run the update in the service's own terminal → service restarts itself when the shell exits
-          - 🔓 OpenClaw gateway + Control UI auto-authenticated (no device-token prompt, opens straight into its dashboard)
-          - 🏠 Home-screen widget: live gateway/Control UI status + one-tap gateway toggle
-          - 🎛 Custom build variants (lite / arm64-only / debug / unsigned / branded) via workflow dispatch — all attach to this same release
-          - 🎨 Loading screen animations kept, dead code removed, Codex CLI wrapper dropped
+          ### v1.6.0
+          - 🛡 **Crash watchdog** — servers that die restart automatically (with backoff) and their card shows a crash-restart counter
+          - 📜 **Per-service log viewer** — real log files (~/.mezchaju/logs), live tail with a filter box, one tap from every card
+          - 🗂 **Terminal tabs** — keep one real Termux PTY per service open and switch between them; updates launch inside tabs
+          - ⌘ **Quick commands** — one-tap palette per service (status, tokens, doctor, version, ports…)
+          - 🔔 **Notification controls** — Start/Stop Gateway and open a terminal straight from the notification shade
+          - 🛠 **mez CLI** — `mez status`, `mez log`, `mez update`, `mez providers`, `mez skills`… installed into every terminal
+          - 💾 **Backup & restore** — zip workspace + providers/config to share; restore from a picked backup, incl. on fresh boots
+          - 📁 **Workspace file browser** — native file list, open a terminal in any folder, share or delete files
+          - 🧩 **Skill packs** — install Android Dev / Git Workflow / Web Scraping guides into ~/workspace/skills from the dashboard
+          - ⚡ **Provider health check** — test OpenCodeZen / OpenRouter / Xkiro keys: latency + model counts
+          - ⏰ **Update notifications** — the background service pings upstreams and notifies when a new release lands
+          - 🧭 **Kept:** native dashboard (no WebView), real Termux PTY, auto-auth gateway, home widget, variant builds
           
           ### Changes
           ${NOTES:-_first stable release_}

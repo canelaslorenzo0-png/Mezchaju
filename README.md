@@ -4,7 +4,7 @@
 
 Mezchaju is an Android APK that boots a full Linux environment in the app’s private storage (Termux-style), installs the agent stack — OpenClaw, DeepSeek Harness (`dsh`) and Claw Code — and opens a **native dashboard** where every service has a live status card, a real terminal, and one-tap updates. No root required. No forced OpenAI login.
 
-> `mezchaju-v1.5.0.apk` · Android 7.0+ (ARM64) · side-load only · one stable release per build (no release spam)
+> `mezchaju-v1.6.0.apk` · Android 7.0+ (ARM64) · side-load only · one stable release per build (no release spam)
 
 ---
 
@@ -18,6 +18,23 @@ Open the app and land straight on a **100% native dashboard** — real Kotlin vi
 - **Real Termux inside** — every card opens a genuine **Termux terminal**: a real POSIX PTY (`libtermux.so` from `termux-app`), real `bash`, real signals, terminal resizing and soft-keyboard input. Not a fake HTML console.
 - **Open UI in one tap** — the OpenClaw Control UI opens **already authenticated** (device token pre-wired), directly into its dashboard. No device-token prompt, no OpenAI login.
 - **Animated, native feel** — smooth transitions between home, terminal and web views, live status pulses, styled service cards, and the polished boot/loading animation.
+
+### 🛡 Reliability & observability
+- **Crash watchdog** — OpenClaw gateway, Control UI, web UI, dashboard and proxy restart automatically if they die (with backoff), and their card shows a `↻ crash restarts` chip.
+- **Per-service log viewer** — every card has a **LOGS** button that tails the real log file (`~/.mezchaju/logs/<svc>.log`) with a live filter; services started from the dashboard already wrote these, now boot services do too.
+- **Update notifications** — the foreground service pings upstreams and posts a notification the moment a new OpenClaw / dsh / Claw Code release lands.
+
+### ⌨️ Terminals & tools
+- **Terminal tabs** — one real Termux PTY per service stays open; tap tabs to switch, `×` to close. Updates and quick commands run inside the service's tab.
+- **⌘ Quick commands** — one-tap palette per service (status, tokens, doctor, version, ports…).
+- **`mez` CLI** — installed into `$PREFIX/bin` and available in every terminal: `mez status`, `mez log`, `mez update`, `mez providers`, `mez skills`, `mez ports`, `mez workspace`.
+- **Notification controls** — Start/Stop Gateway and open a terminal straight from the notification shade.
+
+### 💾 Files & skills
+- **Workspace file browser** — native file list (`~/workspace`): navigate folders, **TERMINAL HERE** to open a shell in that folder, share or delete files.
+- **Backup & restore** — **BACKUP** zips workspace + providers + config for sharing; **RESTORE** picks a backup file and applies it (including on a fresh boot before the harness install).
+- **🧩 Skill packs** — Android Dev, Git Workflow and Web Scraping guides install into `~/workspace/skills` from the dashboard; agents working in the shared workspace pick them up.
+- **⚡ Provider health** — one tap tests OpenCodeZen / OpenRouter / Xkiro keys and reports latency + model counts.
 
 ### 🏠 Home-screen widget
 - A native widget shows **live gateway / Control UI / web UI status** (● online, ○ offline).
@@ -61,7 +78,7 @@ Paste a key in the web UI and it is persisted to `~/.mezchaju/provider.env` for 
 
 ## 📱 Install
 
-1. Download **`mezchaju-v1.5.0.apk`** from the [Releases](https://github.com/canelaslorenzo0-png/Mezchaju/releases) page.
+1. Download **`mezchaju-v1.6.0.apk`** from the [Releases](https://github.com/canelaslorenzo0-png/Mezchaju/releases) page.
 2. Allow “install unknown apps” for your browser / file manager.
 3. Open the app. First boot:
    - extracts the Linux prefix (no root), installs Node.js, Python, OpenClaw, `dsh` and Claw Code;
@@ -84,7 +101,7 @@ CI (`.github/workflows/build-apk.yml`) does all of this on `workflow_dispatch` a
 
 ## 🎛 Custom builds (same release, no extra tags)
 
-All variants attach to the **same** `v1.5.0` release as separate APK assets — one release, never a spam of tags:
+All variants attach to the **same** release of the current version as separate APK assets — one release, never a spam of tags:
 
 | Variant | Gradle flags | What changes |
 |---|---|---|
@@ -139,7 +156,8 @@ docs/index.html             # public landing page (GitHub Pages)
 
 ## ✅ Status
 
-- **v1.5.0**: 100% native dashboard (no WebView home), real Termux PTY terminals per service, home-screen widget, custom build variants (lite/arm64-only/debug/unsigned/branded), Codex CLI wrapper removed.
+- **v1.6.0**: crash watchdog, per-service live logs, terminal tabs, quick commands, notification controls, `mez` CLI, backup/restore, workspace file browser, skill packs, provider health checks, update notifications.
+- v1.5.0: 100% native dashboard (no WebView home), real Termux PTY terminals per service, home-screen widget, custom build variants.
 - Dashboard with per-service start/stop/restart, real terminals, shared workspace and auto-update banners.
 - OpenClaw gateway config rewritten for the current `openclaw` schema (`auth.mode: "none"`), fixing Control UI startup/login on fresh installs.
 - Single stable release per build — no release spam.
