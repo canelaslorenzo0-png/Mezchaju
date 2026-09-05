@@ -32,6 +32,12 @@ android {
     defaultConfig {
         applicationId = "com.codex.mobile"
         minSdk = 24
+        if (onlyArm64) {
+            ndk {
+                // arm64-only builds drop x86 / x86_64 / armeabi-v7a libs.
+                abiFilters += listOf("arm64-v8a")
+            }
+        }
         // targetSdk 28 allows executing binaries from app data directory.
         // Android 10+ (targetSdk 29+) enforces W^X which blocks this via SELinux.
         // Termux (F-Droid) uses the same approach.
@@ -79,13 +85,6 @@ android {
         }
     }
 
-    if (onlyArm64) {
-        ndk {
-            // Drop x86/x86_64/armeabi-v7a native libs: smaller APK for
-            // ARM64 devices (the only supported target).
-            abiFilters += "arm64-v8a"
-        }
-    }
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
@@ -113,16 +112,6 @@ android {
         noCompress += listOf("zip", "tar.gz")
     }
 
-    // Lite builds skip the bundled web UI + WebView fallback assets:
-    // gateway + CLI agents + native dashboard only.
-    sourceSets {
-        getByName("main") {
-            if (isLite) {
-                assets.exclude("**/server-bundle/**")
-                assets.exclude("**/web/**")
-            }
-        }
-    }
 }
 
 dependencies {

@@ -101,6 +101,11 @@ jobs:
             -dname "CN=AnyClaw, OU=Mobile, O=AnyClaw, L=Internet, ST=Internet, C=US"
           printf 'storeFile=release.keystore\nstorePassword=anyclaw-release\nkeyAlias=anyclaw\nkeyPassword=anyclaw-release\n' > android/key.properties
 
+      - name: Trim lite assets (no bundled web UI)
+        if: steps.variant.outputs.variant == 'lite'
+        run: |
+          rm -rf android/app/src/main/assets/web android/app/src/main/assets/server-bundle
+
       - name: Build APK
         working-directory: android
         run: ./gradlew ${{ steps.variant.outputs.task }} ${{ steps.variant.outputs.flags }} --no-daemon
