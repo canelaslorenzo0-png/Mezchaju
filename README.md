@@ -19,6 +19,11 @@ Open the app and land straight on a **100% native dashboard** — real Kotlin vi
 - **Open UI in one tap** — the OpenClaw Control UI opens **already authenticated** (device token pre-wired), directly into its dashboard. No device-token prompt, no OpenAI login.
 - **Animated, native feel** — smooth transitions between home, terminal and web views, live status pulses, styled service cards, and the polished boot/loading animation.
 
+### 🏠 Home-screen widget
+- A native widget shows **live gateway / Control UI / web UI status** (● online, ○ offline).
+- **GATEWAY** button toggles the OpenClaw gateway on/off with one tap; **OPEN** jumps into the app.
+- Stays in sync with the dashboard — and refreshes itself even when the app is in the background.
+
 ### 📁 One shared workspace
 - All agents share a single **`~/workspace`** folder (auto-created and `git init`-ed on first boot).
 - Legacy `~/codex` folders are migrated automatically so nothing splits across drives.
@@ -75,7 +80,22 @@ cd android
 ./gradlew assembleRelease            # signed APK in app/build/outputs/apk/release/
 ```
 
-CI (`.github/workflows/build-apk.yml`) does all of this on `workflow_dispatch` and publishes **one stable release tag per build** — no automatic per-commit release spam.
+CI (`.github/workflows/build-apk.yml`) does all of this on `workflow_dispatch` and publishes **one stable release tag per version** — no automatic per-commit release spam.
+
+## 🎛 Custom builds (same release, no extra tags)
+
+All variants attach to the **same** `v1.5.0` release as separate APK assets — one release, never a spam of tags:
+
+| Variant | Gradle flags | What changes |
+|---|---|---|
+| `stable` | — | Normal APK; creates/refreshes the release artifact |
+| `lite` | `-Plite=true` | No bundled web UI assets — gateway + CLI agents + native dashboard only, smaller and faster builds |
+| `arm64-only` | `-PonlyArm64=true` | Packages only `arm64-v8a` native libs (drops x86/x86_64/armeabi-v7a) |
+| `debug` | `assembleDebug` | Debuggable APK; **long-press the 🦞 title** on the dashboard to wipe all data (prefix, workspace, state) |
+| `unsigned` | `-Punsigned=true` | Unsigned release APK for self-signing |
+| `branded` | `-PbrandName=… -PbrandAccent=…` | Custom app label + accent color (hex without `#`) |
+
+How to build one: **Actions → Build APK → Run workflow** → pick the variant (and brand inputs). Artifacts are also uploaded to the run, and attached to the current release when it exists.
 
 ## 🧩 How it’s wired
 
@@ -110,6 +130,7 @@ android/app/src/main/
 │  ├─ MainActivity.kt       # boot flow → native dashboard (WebView only for Open UI)
 │  ├─ NativeDashboard.kt    # 100% native Kotlin dashboard (no HTML)
 │  ├─ NativeTerminal.kt     # real Termux PTY terminal (bash in shared workspace)
+│  ├─ MezchajuWidget.kt     # home-screen status widget + gateway toggle
 │  ├─ CodexServerManager.kt # process lifecycle for every service
 │  ├─ BootstrapInstaller.kt # prefix extraction / first-run installs
 │  └─ CodexForegroundService.kt
@@ -118,7 +139,7 @@ docs/index.html             # public landing page (GitHub Pages)
 
 ## ✅ Status
 
-- **v1.5.0**: 100% native dashboard (no WebView home), real Termux PTY terminals per service, Codex CLI wrapper removed.
+- **v1.5.0**: 100% native dashboard (no WebView home), real Termux PTY terminals per service, home-screen widget, custom build variants (lite/arm64-only/debug/unsigned/branded), Codex CLI wrapper removed.
 - Dashboard with per-service start/stop/restart, real terminals, shared workspace and auto-update banners.
 - OpenClaw gateway config rewritten for the current `openclaw` schema (`auth.mode: "none"`), fixing Control UI startup/login on fresh installs.
 - Single stable release per build — no release spam.

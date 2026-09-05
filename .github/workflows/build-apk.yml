@@ -2,6 +2,29 @@ name: Build APK
 
 on:
   workflow_dispatch:
+    inputs:
+      variant:
+        description: 'Build variant (stable = normal release APK)'
+        required: true
+        default: stable
+        type: choice
+        options:
+          - stable
+          - lite
+          - arm64-only
+          - debug
+          - unsigned
+          - branded
+      brand_name:
+        description: 'Branded app label (used when variant = branded)'
+        required: false
+        default: 'Mezchaju'
+        type: string
+      brand_accent:
+        description: 'Branded accent hex without # (used when variant = branded)'
+        required: false
+        default: 'FF7849'
+        type: string
 
 permissions:
   contents: write
@@ -16,24 +39,45 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Resolve variant flags
+        id: variant
+        env:
+          VARIANT: ${{ github.event.inputs.variant }}
+          BRAND_NAME: ${{ github.event.inputs.brand_name }}
+          BRAND_ACCENT: ${{ github.event.inputs.brand_accent }}
+        run: |
+          V="${VARIANT:-stable}"
+          PROPS=()
+          case "$V" in
+            lite) PROPS+=("-Plite=true") ;;
+            arm64-only) PROPS+=("-PonlyArm64=true") ;;
+            unsigned) PROPS+=("-Punsigned=true") ;;
+            branded) PROPS+=("-PbrandName=${BRAND_NAME}" "-PbrandAccent=${BRAND_ACCENT}") ;;
+          esac
+          TASK=assembleRelease
+          [ "$V" = "debug" ] && TASK=assembleDebug
+          {
+            echo "task=${TASK}"
+            echo "flags=${PROPS[*]:-}"
+            echo "variant=${V}"
+            echo "stamp=v1.5.0"
+          } >> "$GITHUB_OUTPUT"
+
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
           node-version: "22"
 
-      - name: Install frontend dependencies
+      - name: Build frontend + CLI server
+        if: steps.variant.outputs.variant != 'lite'
         working-directory: openclaw-android
-        run: npm install --no-audit --no-fund
-
-      - name: Build Vue frontend
-        working-directory: openclaw-android
-        run: npm run build:frontend
-
-      - name: Build CLI server
-        working-directory: openclaw-android
-        run: npm run build:cli
+        run: |
+          npm install --no-audit --no-fund
+          npm run build:frontend
+          npm run build:cli
 
       - name: Bundle server into APK assets
+        if: steps.variant.outputs.variant != 'lite'
         run: bash android/scripts/build-server-bundle.sh
 
       - name: Download Termux bootstrap
@@ -49,6 +93,7 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
 
       - name: Generate release keystore
+        if: steps.variant.outputs.variant != 'debug'
         run: |
           keytool -genkeypair -v -keystore android/release.keystore \
             -storepass anyclaw-release -alias anyclaw \
@@ -56,24 +101,35 @@ jobs:
             -dname "CN=AnyClaw, OU=Mobile, O=AnyClaw, L=Internet, ST=Internet, C=US"
           printf 'storeFile=release.keystore\nstorePassword=anyclaw-release\nkeyAlias=anyclaw\nkeyPassword=anyclaw-release\n' > android/key.properties
 
-      - name: Build release APK
+      - name: Build APK
         working-directory: android
-        run: ./gradlew assembleRelease --no-daemon
+        run: ./gradlew ${{ steps.variant.outputs.task }} ${{ steps.variant.outputs.flags }} --no-daemon
 
       - name: Rename APK
+        id: apk
         run: |
-          RELEASE_DIR=android/app/build/outputs/apk/release
-          APK=$(find "$RELEASE_DIR" -maxdepth 1 -name "*.apk" | head -n 1)
-          mv "$APK" "$RELEASE_DIR/mezchaju-v1.5.0.apk"
+          TASK="${{ steps.variant.outputs.task }}"
+          if [ "$TASK" = "assembleDebug" ]; then
+            DIR=android/app/build/outputs/apk/debug
+          else
+            DIR=android/app/build/outputs/apk/release
+          fi
+          APK=$(find "$DIR" -maxdepth 1 -name "*.apk" | head -n 1)
+          V="${{ steps.variant.outputs.variant }}"
+          STAMP="${{ steps.variant.outputs.stamp }}"
+          if [ "$V" = "stable" ]; then NAME="mezchaju-${STAMP}.apk"; else NAME="mezchaju-${V}-${STAMP}.apk"; fi
+          mv "$APK" "$DIR/$NAME"
+          echo "apk=$DIR/$NAME" >> "$GITHUB_OUTPUT"
+          echo "name=$NAME" >> "$GITHUB_OUTPUT"
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: mezchaju-release
-          path: android/app/build/outputs/apk/release/mezchaju-v1.5.0.apk
+          name: mezchaju-${{ steps.variant.outputs.variant }}
+          path: ${{ steps.apk.outputs.apk }}
 
       - name: Generate changelog
-        if: github.ref_type == 'branch'
+        if: steps.variant.outputs.variant == 'stable'
         id: changelog
         run: |
           PREV_TAG=$(git tag --sort=-v:refname | head -1)
@@ -88,31 +144,45 @@ jobs:
             echo "CHANGELOG_EOF"
           } >> "$GITHUB_OUTPUT"
 
-      - name: Create Release
+      - name: Publish to GitHub release
         if: github.ref_type == 'branch'
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: v1.5.0
-          name: "Mezchaju v1.5.0"
-          body: |
-            🦞 **Mezchaju** — OpenClaw + DeepSeek Harness + Claw Code on Android
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          TAG="${{ steps.variant.outputs.stamp }}"
+          V="${{ steps.variant.outputs.variant }}"
+          APK="${{ steps.apk.outputs.apk }}"
+          NAME="${{ steps.apk.outputs.name }}"
+          BRAND_NAME="${{ github.event.inputs.brand_name }}"
+          BRAND_ACCENT="${{ github.event.inputs.brand_accent }}"
 
-            📱 Install the APK on any ARM64 Android 7.0+ device. No root required.
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG exists — attaching $NAME (single release, no spam)."
+            gh release upload "$TAG" "$APK" --clobber
+            exit 0
+          fi
 
-            ### v1.5.0
-            - 🧭 **100% native dashboard (no WebView)** — Kotlin views only, with smooth animated transitions between home, terminals and web UIs
-            - ⌨️ **Real Termux inside** — every service opens a genuine POSIX PTY shell via Termux terminal-emulator (real bash, real signals, resizing, soft keyboard)
-            - 📊 Per-service cards: live status, version, port or `CLI` badge (CLI agents like `dsh` and `claw` are on-demand commands, not port listeners — only servers bind ports)
-            - 🚀 Auto-update terminal: upstream banner → run the update in the service's own terminal → service restarts itself when the shell exits
-            - 🔓 OpenClaw gateway + Control UI auto-authenticated (no device-token prompt, opens straight into its dashboard)
-            - 🎨 Loading screen animations kept, dead code removed, Codex CLI wrapper dropped
+          NOTES="${{ steps.changelog.outputs.notes || '' }}"
+          BODY="🦞 **Mezchaju** — OpenClaw + DeepSeek Harness + Claw Code on Android
 
-            ### Changes
-            ${{ steps.changelog.outputs.notes }}
+📱 Install the APK on any ARM64 Android 7.0+ device. No root required.
 
-            ---
-            Branch: ${{ github.ref_name }}
-            Built from commit ${{ github.sha }}
-          files: android/app/build/outputs/apk/release/mezchaju-v1.5.0.apk
-          draft: false
-          prerelease: false
+### v1.5.0
+- 🧭 **100% native dashboard (no WebView)** — Kotlin views only, with smooth animated transitions between home, terminals and web UIs
+- ⌨️ **Real Termux inside** — every service opens a genuine POSIX PTY shell via Termux terminal-emulator (real bash, real signals, resizing, soft keyboard)
+- 📊 Per-service cards: live status, version, port or \`CLI\` badge (CLI agents like \`dsh\` and \`claw\` are on-demand commands, not port listeners — only servers bind ports)
+- 🚀 Auto-update terminal: upstream banner → run the update in the service's own terminal → service restarts itself when the shell exits
+- 🔓 OpenClaw gateway + Control UI auto-authenticated (no device-token prompt, opens straight into its dashboard)
+- 🏠 Home-screen widget: live gateway/Control UI status + one-tap gateway toggle
+- 🎛 Custom build variants (lite / arm64-only / debug / unsigned / branded) via workflow dispatch — all attach to this same release
+- 🎨 Loading screen animations kept, dead code removed, Codex CLI wrapper dropped
+
+### Changes
+${NOTES:-_first stable release_}
+
+---
+Branch: ${{ github.ref_name }}
+Built from commit ${{ github.sha }}
+Variant: ${V}"
+          gh release create "$TAG" "$APK" --title "Mezchaju $TAG" --notes "$BODY"

@@ -149,7 +149,7 @@
 
   <section id="dashboard">
     <h2>A dashboard that actually runs your stack</h2>
-    <p class="lede">The home screen is <b>100% native Android</b> — Kotlin views, no WebView, no HTML. Every service gets its own card — start it, stop it, restart it, open its UI, or drop into a <b>real Termux terminal</b>. Everything shares one workspace folder (<code>~/workspace</code>, git-initialized).</p>
+    <p class="lede">The home screen is <b>100% native Android</b> — Kotlin views, no WebView, no HTML. Every service gets its own card — start it, stop it, restart it, open its UI, or drop into a <b>real Termux terminal</b>. A home-screen widget shows live status with a one-tap gateway toggle. Everything shares one workspace folder (<code>~/workspace</code>, git-initialized).</p>
     <div class="grid">
       <div class="card">
         <div class="icon">🎮</div>
@@ -168,6 +168,12 @@
         <h3>Auto-update from upstream</h3>
         <p>Mezchaju watches the original GitHub repos. When OpenClaw, DeepSeek Harness or Claw Code release, a banner pops up — update from the terminal and the service restarts itself.</p>
         <span class="tag">openclaw · dsh · claw-code</span>
+      </div>
+      <div class="card">
+        <div class="icon">🏠</div>
+        <h3>Home-screen widget</h3>
+        <p>Live gateway / Control UI / web UI status at a glance, a one-tap gateway toggle and a quick way back into the app — synced with the dashboard.</p>
+        <span class="tag">● online · ○ offline</span>
       </div>
     </div>
   </section>
@@ -190,7 +196,7 @@
       <div class="step"><h4>First run</h4><p>The app sets up a full Linux prefix, installs the harnesses, starts the gateway and opens the native dashboard.</p></div>
     </div>
     <div class="note">
-      ⚠️ First boot downloads Node.js, OpenClaw, DeepSeek Harness and Claw Code into the app’s private storage — allow a few minutes on a good connection. Dashboard API: <code>127.0.0.1:18922</code>.
+      ⚠️ First boot downloads Node.js, OpenClaw, DeepSeek Harness and Claw Code into the app’s private storage — allow a few minutes on a good connection. Dashboard API: <code>127.0.0.1:18922</code>. Custom builds (<b>lite</b>, <b>arm64-only</b>, <b>debug</b>, <b>unsigned</b>, <b>branded</b>) attach to the same release — never a new tag per build.
     </div>
   </section>
 
