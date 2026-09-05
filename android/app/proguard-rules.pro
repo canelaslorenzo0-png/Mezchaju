@@ -1,2 +1,4 @@
-# No special ProGuard rules needed for this app.
-# WebView and security-crypto are handled by default Android rules.
+# Termux terminal emulator/view (native PTY + terminal rendering)
+-keep class com.termux.terminal.** { *; }
+-keep class com.termux.view.** { *; }
+-keepclassmembers class com.termux.terminal.JNI { native <methods>; }
