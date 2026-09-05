@@ -1,0 +1,14 @@
+node_modules/
+dist/
+dist-cli/
+build/
+*.apk
+*.aab
+*.keystore
+key.properties
+local.properties
+bootstrap-*.zip
+server-bundle/
+.idea/
+*.iml
+.DS_Store
