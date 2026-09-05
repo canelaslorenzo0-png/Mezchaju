@@ -1,0 +1,80 @@
+#!/data/user/0/com.codex.mobile/files/usr/bin/sh
+# Mezchaju CLI — control the on-device stack from any terminal.
+# Usage: mez <command> [service] [args]
+#
+#   mez status                 live status of every service
+#   mez log <svc> [lines]      tail a service log
+#   mez start|stop|restart s   control a server
+#   mez update [svc|all]       run upstream update (restarts service)
+#   mez open <svc>             print the Open UI url
+#   mez ports                  list bound ports
+#   mez workspace              print the shared workspace path
+#   mez providers              test provider keys (latency + models)
+#   mez backup                 print backup instructions
+#   mez skills                 list installed skill packs
+
+BASE="http://127.0.0.1:18922"
+HOME_DIR="${HOME:-/data/data/com.codex.mobile/files/home}"
+WS="${MEZCHAJU_WORKSPACE:-${HOME_DIR}/workspace}"
+
+json() { node -e "$1"; }
+
+case "$1" in
+  status)
+    curl -s "$BASE/health" | json '
+      const h=JSON.parse(require("fs").readFileSync(0,"utf8"));
+      console.log("Mezchaju "+(h.version||"?")+" — workspace: "+(h.workspace||""));
+      for (const [k,v] of Object.entries(h.services||{})) {
+        console.log((v.status==="online"||v.status==="installed"?"●":"○")+" "+k.padEnd(22)+" "+(v.status||"")+(v.restarts>0?"  (restarted "+v.restarts+"x)":"")+(v.kind==="server"?"  port "+v.port:"  CLI"));
+      }
+      const up=Object.entries(h.updates||{}).filter(([,u])=>u.available);
+      console.log(up.length?("Updates available: "+up.map(([k])=>k).join(", ")):"All up to date");
+    ' ;;
+  log) curl -s "$BASE/logs?service=$2&tail=${3:-100}" | json '
+      const r=JSON.parse(require("fs").readFileSync(0,"utf8"));
+      console.log((r.lines||[]).join("\n"));
+    ' ;;
+  start|stop|restart)
+    [ -n "$2" ] || { echo "usage: mez $1 <svc>"; exit 1; }
+    curl -s -X POST -H 'Content-Type: application/json' "$BASE/api" \
+      -d "{\"action\":\"$1\",\"service\":\"$2\"}" | json '
+      const r=JSON.parse(require("fs").readFileSync(0,"utf8"));
+      console.log(r.ok ? "ok" : ("error: "+(r.error||"unknown")));
+    ' ;;
+  update)
+    if [ -z "$2" ] || [ "$2" = "all" ]; then
+      echo "Run: mez update <svc> (openclaw-gateway, openclaw-control-ui, deepseek-harness, claw-code)"
+      exit 0
+    fi
+    curl -s -X POST -H 'Content-Type: application/json' "$BASE/api" \
+      -d "{\"action\":\"update\",\"service\":\"$2\"}" | json '
+      const r=JSON.parse(require("fs").readFileSync(0,"utf8"));
+      console.log(r.ok ? "update started in terminal" : ("error: "+(r.error||"unknown")));
+    ' ;;
+  open)
+    case "$2" in
+      openclaw-gateway|openclaw-control-ui) echo "http://127.0.0.1:19001/";;
+      *) echo "http://127.0.0.1:18923/";;
+    esac ;;
+  ports)
+    curl -s "$BASE/health" | json '
+      const h=JSON.parse(require("fs").readFileSync(0,"utf8"));
+      for (const [k,v] of Object.entries(h.services||{})) if (v.kind==="server") console.log(v.port+"  "+k);
+    ' ;;
+  workspace) echo "$WS" ;;
+  providers)
+    curl -s -X POST -H 'Content-Type: application/json' "$BASE/api" \
+      -d '{"action":"providers-test"}' | json '
+      const r=JSON.parse(require("fs").readFileSync(0,"utf8"));
+      if(!r.ok){console.log("error: "+(r.error||""));process.exit(1)}
+      for (const p of r.providers||[]) {
+        console.log((p.ok?"●":"○")+" "+p.label.padEnd(12)+" "+(p.ok ? p.ms+"ms · "+p.models+" models" : (p.error||"no key")));
+      }
+    ' ;;
+  skills)
+    WS_DIR="$WS/skills"; [ -d "$WS_DIR" ] && ls -1 "$WS_DIR" || echo "no skill packs installed (open the app dashboard → Skills)" ;;
+  backup)
+    echo "Open the app dashboard → BACKUP (creates a zip you can share/save)." ;;
+  *)
+    sed -n '2,12p' "$0" ;;
+esac

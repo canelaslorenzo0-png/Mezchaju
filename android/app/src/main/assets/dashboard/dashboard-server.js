@@ -281,15 +281,18 @@ async function restartService(name) {
 
 const UPDATES = {}; // service -> { latest, fetchedAt }
 
-function httpsGetJson(host, reqPath, timeoutMs = 20000) {
+function httpsGetJson(host, reqPath, timeoutMs = 20000, opts = {}) {
   return new Promise((resolve, reject) => {
     const finish = (err, value) => { clearTimeout(timer); err ? reject(err) : resolve(value); };
     const timer = setTimeout(() => finish(new Error('timeout')), timeoutMs);
     const proxy = process.env.HTTPS_PROXY || process.env.https_proxy || process.env.HTTP_PROXY || process.env.http_proxy;
+    const extraHeaders = (opts.headers ? Object.entries(opts.headers).map(([k, v]) => `${k}: ${v}`) : []).join('\r\n');
     const doTls = (socket, headersKey) => {
       const tlsSock = tls.connect({ socket, servername: host, rejectUnauthorized: false }, () => {
         tlsSock.write(
-          `GET ${reqPath} HTTP/1.1\r\nHost: ${host}\r\nUser-Agent: MezchajuDashboard/1.0\r\nAccept: application/json\r\nConnection: close\r\n\r\n`,
+          `GET ${reqPath} HTTP/1.1\r\nHost: ${host}\r\nUser-Agent: MezchajuDashboard/1.0\r\nAccept: application/json\r\n` +
+            (extraHeaders ? extraHeaders + '\r\n' : '') +
+            `Connection: close\r\n\r\n`,
         );
       });
       let data = Buffer.alloc(0);
@@ -617,6 +620,61 @@ function sendJson(res, obj, status = 200) {
   res.end(body);
 }
 
+function restartsMap() {
+  try {
+    const raw = fs.readFileSync(path.join(RUN_DIR, 'restarts.json'), 'utf8');
+    const d = JSON.parse(raw);
+    return (d && typeof d === 'object') ? d : {};
+  } catch {
+    return {};
+  }
+}
+
+// ─── Provider health checks (OpenCodeZen / OpenRouter / Xkiro) ─────────────
+
+const PROVIDER_DEFS = [
+  { key: 'opencodezen', label: 'OpenCodeZen', base: 'https://api.opencodezen.ai/v1', env: 'OPENCODEZEN_API_KEY' },
+  { key: 'openrouter', label: 'OpenRouter', base: 'https://openrouter.ai/api/v1', env: 'OPENROUTER_API_KEY' },
+  { key: 'xkiro', label: 'Xkiro', base: 'https://api.xkiro.com/v1', env: 'XKIRO_API_KEY' },
+];
+
+function providerEnv() {
+  const out = {};
+  try {
+    const f = path.join(HOME, '.mezchaju/provider.env');
+    if (fs.existsSync(f)) {
+      for (const line of fs.readFileSync(f, 'utf8').split('\n')) {
+        const i = line.indexOf('=');
+        if (i > 0) out[line.slice(0, i)] = line.slice(i + 1).trim();
+      }
+    }
+  } catch {}
+  return out;
+}
+
+async function testProviders() {
+  const env = providerEnv();
+  const results = [];
+  for (const def of PROVIDER_DEFS) {
+    const key = env[def.env] || '';
+    if (!key) {
+      results.push({ key: def.key, label: def.label, ok: false, error: 'no key', ms: 0, models: 0 });
+      continue;
+    }
+    const started = Date.now();
+    try {
+      const data = await httpsGetJson(def.base.replace('https://', ''), '/models', 15000, {
+        headers: { Authorization: `Bearer ${key}` },
+      });
+      const models = Array.isArray(data?.data) ? data.data.length : 0;
+      results.push({ key: def.key, label: def.label, ok: true, ms: Date.now() - started, models });
+    } catch (e) {
+      results.push({ key: def.key, label: def.label, ok: false, error: String(e.message || e).slice(0, 120), ms: Date.now() - started, models: 0 });
+    }
+  }
+  return results;
+}
+
 async function healthPayload() {
   const statuses = {};
   for (const [name, svc] of Object.entries(SERVICES)) {
@@ -629,14 +687,20 @@ async function healthPayload() {
   return {
     ok: true,
     app: 'Mezchaju',
-    version: '1.5.0',
+    version: '1.6.0',
     workspace: WORKSPACE,
     prefix: PREFIX,
     controlToken: controlToken(),
     services: Object.fromEntries(
       Object.entries(SERVICES).map(([name, svc]) => [
         name,
-        { ...svc, startCmd: undefined, status: statuses[name], version: installedVersion(name) },
+        {
+          ...svc,
+          startCmd: undefined,
+          status: statuses[name],
+          version: installedVersion(name),
+          restarts: restartsMap()[name] || 0,
+        },
       ]),
     ),
     updates: getUpdates(),
@@ -652,6 +716,18 @@ const server = http.createServer((req, res) => {
   }
   if (req.method === 'GET' && p === '/health') {
     return healthPayload().then((h) => sendJson(res, h)).catch((e) => sendJson(res, { ok: false, error: e.message }, 500));
+  }
+  if (req.method === 'GET' && p === '/logs') {
+    const name = url.searchParams.get('service') || '';
+    const tail = Math.min(parseInt(url.searchParams.get('tail') || '200', 10) || 200, 2000);
+    if (!SERVICES[name]) return sendJson(res, { ok: false, error: 'unknown service' }, 400);
+    const f = path.join(LOG_DIR, `${name}.log`);
+    fs.readFile(f, (err, data) => {
+      if (err) return sendJson(res, { ok: true, lines: [] });
+      const lines = data.toString('utf8').split('\n').filter((l) => l.trim().length > 0).slice(-tail);
+      sendJson(res, { ok: true, lines });
+    });
+    return;
   }
   if (req.method === 'GET' && p === '/openui/openclaw') {
     const target = `http://127.0.0.1:19001/?token=${controlToken()}`;
@@ -713,6 +789,9 @@ async function handleApi(msg, ws, respond) {
       break;
     case 'checks':
       try { reply({ ok: true, updates: await checkUpdates(true) }); } catch (e) { reply({ ok: false, error: e.message }); }
+      break;
+    case 'providers-test':
+      try { reply({ ok: true, providers: await testProviders() }); } catch (e) { reply({ ok: false, error: e.message }); }
       break;
     case 'version':
       reply({ ok: true, version: installedVersion(name) });
