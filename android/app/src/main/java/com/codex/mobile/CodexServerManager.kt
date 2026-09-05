@@ -143,16 +143,6 @@ class CodexServerManager(private val context: Context) {
         val fixCmd = """
             chmod 700 "$prefix/bin/node" 2>/dev/null
 
-            CODEX_JS="$prefix/lib/node_modules/@openai/codex/bin/codex.js"
-            if [ -f "${'$'}CODEX_JS" ]; then
-                rm -f "$prefix/bin/codex"
-                cat > "$prefix/bin/codex" << 'WEOF'
-#!/data/user/0/com.codex.mobile/files/usr/bin/sh
-exec /data/user/0/com.codex.mobile/files/usr/bin/node /data/user/0/com.codex.mobile/files/usr/lib/node_modules/@openai/codex/bin/codex.js "${'$'}@"
-WEOF
-                chmod 700 "$prefix/bin/codex"
-            fi
-
             NPM_CLI="$prefix/lib/node_modules/npm/bin/npm-cli.js"
             if [ -f "${'$'}NPM_CLI" ]; then
                 rm -f "$prefix/bin/npm"
@@ -1480,6 +1470,9 @@ H3
      * ~/codex folder exists from a previous install, it is migrated so all
      * files/projects stay in a single place.
      */
+    fun workspacePath(): String =
+        File(BootstrapInstaller.getPaths(context).homeDir, WORKSPACE_DIR).absolutePath
+
     fun ensureDefaultWorkspace() {
         val paths = BootstrapInstaller.getPaths(context)
         val legacy = File(paths.homeDir, "codex")
@@ -1519,7 +1512,7 @@ H3
         Log.i(TAG, "Wrote full-access config to $configFile")
     }
 
-    private fun buildEnvironment(
+    fun buildEnvironment(
         paths: BootstrapInstaller.Paths,
     ): Map<String, String> {
         val bionicCompat = "${paths.homeDir}/.openclaw-android/patches/bionic-compat.js"
