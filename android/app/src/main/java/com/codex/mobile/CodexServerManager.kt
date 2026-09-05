@@ -2,11 +2,21 @@ package com.codex.mobile
 
 import android.content.Context
 import android.util.Log
+import org.json.JSONObject
 import java.io.BufferedReader
+import java.io.BufferedOutputStream
 import java.io.File
 import java.io.InputStreamReader
 import java.net.HttpURLConnection
 import java.net.URL
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.zip.ZipEntry
+import java.util.zip.ZipFile
+import java.util.zip.ZipOutputStream
 
 /**
  * Manages the lifecycle of the Node.js codex-web-local server process running
@@ -31,6 +41,11 @@ class CodexServerManager(private val context: Context) {
     private var openClawGatewayProcess: Process? = null
     private var openClawControlUiProcess: Process? = null
     private var dashboardProcess: Process? = null
+
+    // Crash watchdog state: unexpected exits restart the service with
+    // backoff and bump a counter shown on the dashboard card.
+    private val watchdogsActive = AtomicBoolean(false)
+    private val restartCounts = ConcurrentHashMap<String, Int>()
 
     val isRunning: Boolean
         get() {
@@ -911,27 +926,12 @@ H3
         """.trimIndent()) { Log.d(TAG, "[openclaw-gw] $it") }
 
         val env = buildEnvironment(paths)
-        val shell = "${paths.prefixDir}/bin/sh"
         val cmd = "exec openclaw gateway run --force --port $OPENCLAW_GATEWAY_PORT 2>&1"
 
-        val pb = ProcessBuilder(shell, "-c", cmd)
-        pb.environment().clear()
-        pb.environment().putAll(env)
-        pb.directory(File(paths.homeDir))
-        pb.redirectErrorStream(true)
-
-        val proc = pb.start()
-        openClawGatewayProcess = proc
-
-        Thread {
-            val reader = BufferedReader(InputStreamReader(proc.inputStream))
-            var line = reader.readLine()
-            while (line != null) {
-                Log.d(TAG, "[openclaw-gw] $line")
-                line = reader.readLine()
-            }
-            Log.i(TAG, "OpenClaw gateway exited with code: ${proc.waitFor()}")
-        }.start()
+        val proc = spawnWatched("openclaw-gateway", cmd, env, File(paths.homeDir)) {
+            openClawGatewayProcess = it
+        }
+        if (proc == null) return false
 
         Thread.sleep(5000)
         Log.i(TAG, "OpenClaw gateway started on port $OPENCLAW_GATEWAY_PORT")
@@ -998,24 +998,10 @@ H3
             " 2>&1
         """.trimIndent()
 
-        val pb = ProcessBuilder(shell, "-c", "exec $serverScript")
-        pb.environment().clear()
-        pb.environment().putAll(env)
-        pb.directory(File(paths.homeDir))
-        pb.redirectErrorStream(true)
-
-        val proc = pb.start()
-        openClawControlUiProcess = proc
-
-        Thread {
-            val reader = BufferedReader(InputStreamReader(proc.inputStream))
-            var line = reader.readLine()
-            while (line != null) {
-                Log.d(TAG, "[openclaw-ui] $line")
-                line = reader.readLine()
-            }
-            Log.i(TAG, "OpenClaw Control UI server exited with code: ${proc.waitFor()}")
-        }.start()
+        val proc = spawnWatched("openclaw-control-ui", "exec $serverScript", env, File(paths.homeDir)) {
+            openClawControlUiProcess = it
+        }
+        if (proc == null) return false
 
         Thread.sleep(1000)
         Log.i(TAG, "OpenClaw Control UI server started on port $OPENCLAW_CONTROL_UI_PORT")
@@ -1174,24 +1160,10 @@ H3
         val shell = "${paths.prefixDir}/bin/sh"
         val cmd = "exec node ${proxyScript.absolutePath}"
 
-        val pb = ProcessBuilder(shell, "-c", cmd)
-        pb.environment().clear()
-        pb.environment().putAll(env)
-        pb.directory(File(paths.homeDir))
-        pb.redirectErrorStream(true)
-
-        val proc = pb.start()
-        proxyProcess = proc
-
-        Thread {
-            val reader = BufferedReader(InputStreamReader(proc.inputStream))
-            var line = reader.readLine()
-            while (line != null) {
-                Log.d(TAG, "[proxy] $line")
-                line = reader.readLine()
-            }
-            Log.i(TAG, "Proxy exited with code: ${proc.waitFor()}")
-        }.start()
+        val proc = spawnWatched("proxy", cmd, env, File(paths.homeDir)) {
+            proxyProcess = it
+        }
+        if (proc == null) return false
 
         Thread.sleep(800)
         Log.i(TAG, "CONNECT proxy started on 127.0.0.1:$PROXY_PORT")
@@ -1232,31 +1204,14 @@ H3
             return false
         }
 
-        val shell = "${paths.prefixDir}/bin/sh"
         val command = "exec node $serverScript --port $SERVER_PORT --no-password"
 
         Log.i(TAG, "Starting server: $command")
 
-        val pb = ProcessBuilder(shell, "-c", command)
-        pb.environment().clear()
-        pb.environment().putAll(env)
-        pb.directory(File(paths.homeDir))
-        pb.redirectErrorStream(true)
-
-        val proc = pb.start()
-        serverProcess = proc
-
-        Thread {
-            val reader = BufferedReader(InputStreamReader(proc.inputStream))
-            var line = reader.readLine()
-            while (line != null) {
-                Log.d(TAG, "[server] $line")
-                line = reader.readLine()
-            }
-            Log.i(TAG, "Server process exited with code: ${proc.waitFor()}")
-        }.start()
-
-        return true
+        val proc = spawnWatched("mezchaju-web", command, env, File(paths.homeDir)) {
+            serverProcess = it
+        }
+        return proc != null
     }
 
     fun waitForServer(timeoutMs: Long = 60_000): Boolean {
@@ -1341,27 +1296,12 @@ H3
         env["ALL_PROXY"] = "http://127.0.0.1:$PROXY_PORT"
         if (BuildConfig.LITE) env["MEZCHAJU_LITE"] = "1"
 
-        val shell = "${paths.prefixDir}/bin/sh"
         val cmd = "exec node ${script.absolutePath} --port=$DASHBOARD_PORT"
 
-        val pb = ProcessBuilder(shell, "-c", cmd)
-        pb.environment().clear()
-        pb.environment().putAll(env)
-        pb.directory(File(paths.homeDir))
-        pb.redirectErrorStream(true)
-
-        val proc = pb.start()
-        dashboardProcess = proc
-
-        Thread {
-            val reader = BufferedReader(InputStreamReader(proc.inputStream))
-            var line = reader.readLine()
-            while (line != null) {
-                Log.d(TAG, "[dashboard] $line")
-                line = reader.readLine()
-            }
-            Log.i(TAG, "Dashboard process exited with code: ${proc.waitFor()}")
-        }.start()
+        val proc = spawnWatched("dashboard", cmd, env, File(paths.homeDir)) {
+            dashboardProcess = it
+        }
+        if (proc == null) return false
 
         Thread.sleep(1200)
         Log.i(TAG, "Dashboard started on port $DASHBOARD_PORT")
@@ -1440,6 +1380,7 @@ H3
     }
 
     fun stopServer() {
+        watchdogsActive.set(false)
         val proc = serverProcess ?: return
         serverProcess = null
 
@@ -1466,6 +1407,242 @@ H3
         openClawGatewayProcess = null
         openClawControlUiProcess?.destroy()
         openClawControlUiProcess = null
+    }
+
+    // ── Watchdog / managed processes ──────────────────────────────────────────
+
+    /** Enable or disable the crash watchdog (disabled during shutdown). */
+    fun setWatchdogsActive(active: Boolean) {
+        watchdogsActive.set(active)
+    }
+
+    /**
+     * Spawn a long-running service with output appended to
+     * ~/.mezchaju/logs/<name>.log and a watchdog thread that restarts it
+     * (with backoff + counter) whenever it exits while the app is healthy.
+     */
+    private fun spawnWatched(
+        name: String,
+        cmd: String,
+        env: Map<String, String>,
+        cwd: File,
+        onProc: (Process) -> Unit,
+    ): Process? {
+        val paths = BootstrapInstaller.getPaths(context)
+        val logFile = File(File(paths.homeDir, ".mezchaju/logs"), "$name.log")
+        logFile.parentFile?.mkdirs()
+
+        val shell = "${paths.prefixDir}/bin/sh"
+        val pb = ProcessBuilder(shell, "-c", cmd)
+        pb.environment().clear()
+        pb.environment().putAll(env)
+        pb.directory(cwd)
+        pb.redirectErrorStream(true)
+        pb.redirectOutput(ProcessBuilder.Redirect.appendTo(logFile))
+
+        val proc = try {
+            pb.start()
+        } catch (e: Exception) {
+            Log.e(TAG, "[watchdog] failed to start $name: ${e.message}")
+            return null
+        }
+        onProc(proc)
+
+        Thread({
+            try {
+                proc.waitFor()
+            } catch (_: InterruptedException) {
+                return@Thread
+            }
+            val code = try { proc.exitValue() } catch (_: Exception) { -1 }
+            Log.w(TAG, "[watchdog] $name exited with code $code")
+            if (!watchdogsActive.get()) return@Thread
+            val n = (restartCounts[name] ?: 0) + 1
+            restartCounts[name] = n
+            writeRestartsFile()
+            if (n > 30) {
+                Log.e(TAG, "[watchdog] $name gave up after $n restarts")
+                return@Thread
+            }
+            Thread.sleep(minOf(3000L + n * 2000L, 60_000L))
+            if (!watchdogsActive.get()) return@Thread
+            Log.i(TAG, "[watchdog] restarting $name (#$n)")
+            spawnWatched(name, cmd, env, cwd, onProc)
+        }, "watch-$name").start()
+
+        return proc
+    }
+
+    private fun writeRestartsFile() {
+        try {
+            val paths = BootstrapInstaller.getPaths(context)
+            val f = File(File(paths.homeDir, ".mezchaju/run"), "restarts.json")
+            f.parentFile?.mkdirs()
+            f.writeText(JSONObject(restartCounts).toString())
+        } catch (e: Exception) {
+            Log.w(TAG, "writeRestartsFile failed: ${e.message}")
+        }
+    }
+
+    // ── Backup / restore ─────────────────────────────────────────────────────
+
+    /** Zip ~/workspace + ~/.mezchaju (config, providers, state) for sharing. */
+    fun backupAll(): File? {
+        val paths = BootstrapInstaller.getPaths(context)
+        val backupDir = File(context.filesDir, "backups").apply { mkdirs() }
+        val stamp = SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date())
+        val zipFile = File(backupDir, "mezchaju-backup-$stamp.zip")
+        try {
+            ZipOutputStream(BufferedOutputStream(zipFile.outputStream())).use { zos ->
+                fun addDir(dir: File, base: String) {
+                    dir.listFiles()?.forEach { f ->
+                        val entry = if (base.isEmpty()) f.name else "$base/${f.name}"
+                        if (f.isDirectory) {
+                            addDir(f, entry)
+                        } else {
+                            zos.putNextEntry(ZipEntry(entry))
+                            f.inputStream().use { it.copyTo(zos) }
+                            zos.closeEntry()
+                        }
+                    }
+                }
+                addDir(File(paths.homeDir, WORKSPACE_DIR), "workspace")
+                addDir(File(paths.homeDir, ".mezchaju"), ".mezchaju")
+            }
+            Log.i(TAG, "Backup written to ${zipFile.absolutePath}")
+            return zipFile
+        } catch (e: Exception) {
+            Log.e(TAG, "backupAll failed: ${e.message}")
+            return null
+        }
+    }
+
+    /** Restore a backup zip (workspace + .mezchaju) into the app home. */
+    fun restoreFromZip(file: File): Boolean {
+        val paths = BootstrapInstaller.getPaths(context)
+        val home = File(paths.homeDir)
+        try {
+            ZipFile(file).use { zf ->
+                val entries = zf.entries()
+                while (entries.hasMoreElements()) {
+                    val e = entries.nextElement() as ZipEntry
+                    if (e.isDirectory) continue
+                    val target = File(home, e.name.replace("../", ""))
+                    target.parentFile?.mkdirs()
+                    zf.getInputStream(e).use { input ->
+                        target.outputStream().use { output -> input.copyTo(output) }
+                    }
+                }
+            }
+            Log.i(TAG, "Restore applied from ${file.absolutePath}")
+            return true
+        } catch (e: Exception) {
+            Log.e(TAG, "restoreFromZip failed: ${e.message}")
+            return false
+        }
+    }
+
+    // ── mez CLI ──────────────────────────────────────────────────────────────
+
+    /** Install the [mez] command into $PREFIX/bin for every terminal session. */
+    fun installMezCli(): Boolean {
+        val paths = BootstrapInstaller.getPaths(context)
+        val target = File(paths.prefixDir, "bin/mez")
+        return try {
+            context.assets.open("mez").use { input ->
+                target.outputStream().use { output -> input.copyTo(output) }
+            }
+            target.setExecutable(true, false)
+            Log.i(TAG, "mez CLI installed at ${target.absolutePath}")
+            true
+        } catch (e: Exception) {
+            Log.e(TAG, "installMezCli failed: ${e.message}")
+            false
+        }
+    }
+
+    // ── Skill packs ──────────────────────────────────────────────────────────
+
+    data class SkillPack(
+        val id: String,
+        val name: String,
+        val description: String,
+        val dir: String,
+    )
+
+    fun listSkillPacks(): List<SkillPack> {
+        val out = mutableListOf<SkillPack>()
+        try {
+            val dirs = context.assets.list("skills") ?: return out
+            for (id in dirs) {
+                try {
+                    val txt = context.assets.open("skills/$id/manifest.json")
+                        .bufferedReader().use { it.readText() }
+                    val j = JSONObject(txt)
+                    out += SkillPack(
+                        id,
+                        j.optString("name", id),
+                        j.optString("description", ""),
+                        j.optString("dir", id),
+                    )
+                } catch (_: Exception) {
+                }
+            }
+        } catch (_: Exception) {
+        }
+        return out
+    }
+
+    fun installedSkills(): Set<String> {
+        val paths = BootstrapInstaller.getPaths(context)
+        return try {
+            val j = JSONObject(File(File(paths.homeDir, ".mezchaju"), "skills.json").readText())
+            j.keys().asSequence().filter { j.optBoolean(it) }.toSet()
+        } catch (_: Exception) {
+            emptySet()
+        }
+    }
+
+    fun installSkill(pack: SkillPack): Boolean {
+        val paths = BootstrapInstaller.getPaths(context)
+        val ws = File(paths.homeDir, WORKSPACE_DIR)
+        val dir = File(ws, "skills/${pack.dir}")
+        return try {
+            dir.deleteRecursively()
+            extractAssetDir("skills/${pack.dir}", dir)
+            markSkill(pack.dir, true)
+            Log.i(TAG, "Skill installed: ${pack.dir}")
+            true
+        } catch (e: Exception) {
+            Log.e(TAG, "installSkill failed: ${e.message}")
+            false
+        }
+    }
+
+    fun removeSkill(pack: SkillPack): Boolean {
+        val paths = BootstrapInstaller.getPaths(context)
+        val ws = File(paths.homeDir, WORKSPACE_DIR)
+        return try {
+            File(ws, "skills/${pack.dir}").deleteRecursively()
+            markSkill(pack.dir, false)
+            true
+        } catch (e: Exception) {
+            Log.e(TAG, "removeSkill failed: ${e.message}")
+            false
+        }
+    }
+
+    private fun markSkill(id: String, installed: Boolean) {
+        val paths = BootstrapInstaller.getPaths(context)
+        val f = File(File(paths.homeDir, ".mezchaju"), "skills.json")
+        val j = try {
+            JSONObject(f.readText())
+        } catch (_: Exception) {
+            JSONObject()
+        }
+        j.put(id, installed)
+        f.parentFile?.mkdirs()
+        f.writeText(j.toString())
     }
 
     // ── Helpers ──────────────────────────────────────────────────────────────
