@@ -154,8 +154,6 @@ jobs:
           V="${{ steps.variant.outputs.variant }}"
           APK="${{ steps.apk.outputs.apk }}"
           NAME="${{ steps.apk.outputs.name }}"
-          BRAND_NAME="${{ github.event.inputs.brand_name }}"
-          BRAND_ACCENT="${{ github.event.inputs.brand_accent }}"
 
           if gh release view "$TAG" >/dev/null 2>&1; then
             echo "Release $TAG exists — attaching $NAME (single release, no spam)."
@@ -165,24 +163,24 @@ jobs:
 
           NOTES="${{ steps.changelog.outputs.notes || '' }}"
           BODY="🦞 **Mezchaju** — OpenClaw + DeepSeek Harness + Claw Code on Android
-
-📱 Install the APK on any ARM64 Android 7.0+ device. No root required.
-
-### v1.5.0
-- 🧭 **100% native dashboard (no WebView)** — Kotlin views only, with smooth animated transitions between home, terminals and web UIs
-- ⌨️ **Real Termux inside** — every service opens a genuine POSIX PTY shell via Termux terminal-emulator (real bash, real signals, resizing, soft keyboard)
-- 📊 Per-service cards: live status, version, port or \`CLI\` badge (CLI agents like \`dsh\` and \`claw\` are on-demand commands, not port listeners — only servers bind ports)
-- 🚀 Auto-update terminal: upstream banner → run the update in the service's own terminal → service restarts itself when the shell exits
-- 🔓 OpenClaw gateway + Control UI auto-authenticated (no device-token prompt, opens straight into its dashboard)
-- 🏠 Home-screen widget: live gateway/Control UI status + one-tap gateway toggle
-- 🎛 Custom build variants (lite / arm64-only / debug / unsigned / branded) via workflow dispatch — all attach to this same release
-- 🎨 Loading screen animations kept, dead code removed, Codex CLI wrapper dropped
-
-### Changes
-${NOTES:-_first stable release_}
-
----
-Branch: ${{ github.ref_name }}
-Built from commit ${{ github.sha }}
-Variant: ${V}"
+          
+          📱 Install the APK on any ARM64 Android 7.0+ device. No root required.
+          
+          ### v1.5.0
+          - 🧭 **100% native dashboard (no WebView)** — Kotlin views only, with smooth animated transitions between home, terminals and web UIs
+          - ⌨️ **Real Termux inside** — every service opens a genuine POSIX PTY shell via Termux terminal-emulator (real bash, real signals, resizing, soft keyboard)
+          - 📊 Per-service cards: live status, version, port or `CLI` badge (CLI agents like `dsh` and `claw` are on-demand commands, not port listeners — only servers bind ports)
+          - 🚀 Auto-update terminal: upstream banner → run the update in the service's own terminal → service restarts itself when the shell exits
+          - 🔓 OpenClaw gateway + Control UI auto-authenticated (no device-token prompt, opens straight into its dashboard)
+          - 🏠 Home-screen widget: live gateway/Control UI status + one-tap gateway toggle
+          - 🎛 Custom build variants (lite / arm64-only / debug / unsigned / branded) via workflow dispatch — all attach to this same release
+          - 🎨 Loading screen animations kept, dead code removed, Codex CLI wrapper dropped
+          
+          ### Changes
+          ${NOTES:-_first stable release_}
+          
+          ---
+          Branch: ${{ github.ref_name }}
+          Built from commit ${{ github.sha }}
+          Variant: ${V}"
           gh release create "$TAG" "$APK" --title "Mezchaju $TAG" --notes "$BODY"
