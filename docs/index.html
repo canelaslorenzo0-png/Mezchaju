@@ -149,7 +149,7 @@
 
   <section id="dashboard">
     <h2>A dashboard that actually runs your stack</h2>
-    <p class="lede">Every service gets its own card — start it, stop it, restart it, open its UI, or drop into a real per-service terminal. Everything shares one workspace folder (<code>~/workspace</code>, git-initialized).</p>
+    <p class="lede">The home screen is <b>100% native Android</b> — Kotlin views, no WebView, no HTML. Every service gets its own card — start it, stop it, restart it, open its UI, or drop into a <b>real Termux terminal</b>. Everything shares one workspace folder (<code>~/workspace</code>, git-initialized).</p>
     <div class="grid">
       <div class="card">
         <div class="icon">🎮</div>
@@ -159,9 +159,9 @@
       </div>
       <div class="card">
         <div class="icon">⌨️</div>
-        <h3>Real terminal per service</h3>
-        <p>Each card opens an interactive terminal in the shared workspace. Run agents, inspect logs, or type commands freely — all on-device.</p>
-        <span class="tag">interactive · shared cwd</span>
+        <h3>Real Termux inside</h3>
+        <p>Each card opens a genuine POSIX PTY via Termux terminal-emulator (<code>libtermux.so</code>) — real <code>bash</code>, real signals, resizing and soft keyboard. Servers show their port; CLI agents (<code>dsh</code>, <code>claw</code>) show a <code>CLI</code> badge because they are on-demand commands, not port listeners.</p>
+        <span class="tag">real PTY · shared cwd</span>
       </div>
       <div class="card">
         <div class="icon">🚀</div>
@@ -185,12 +185,12 @@
   <section id="install">
     <h2>Install in three steps</h2>
     <div class="steps">
-      <div class="step"><h4>Download the APK</h4><p>Grab <code>mezchaju-v1.4.0.apk</code> from Releases — one stable release per build, no spam.</p></div>
+      <div class="step"><h4>Download the APK</h4><p>Grab <code>mezchaju-v1.5.0.apk</code> from Releases — one stable release per build, no spam.</p></div>
       <div class="step"><h4>Allow sideload</h4><p>Enable “install unknown apps” for your browser or file manager.</p></div>
       <div class="step"><h4>First run</h4><p>The app sets up a full Linux prefix, installs the harnesses, starts the gateway and opens the native dashboard.</p></div>
     </div>
     <div class="note">
-      ⚠️ First boot downloads Node.js, OpenClaw, DeepSeek Harness and Claw Code into the app’s private storage — allow a few minutes on a good connection.
+      ⚠️ First boot downloads Node.js, OpenClaw, DeepSeek Harness and Claw Code into the app’s private storage — allow a few minutes on a good connection. Dashboard API: <code>127.0.0.1:18922</code>.
     </div>
   </section>
 

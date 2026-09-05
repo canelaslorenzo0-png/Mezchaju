@@ -4,19 +4,20 @@
 
 Mezchaju is an Android APK that boots a full Linux environment in the app’s private storage (Termux-style), installs the agent stack — OpenClaw, DeepSeek Harness (`dsh`) and Claw Code — and opens a **native dashboard** where every service has a live status card, a real terminal, and one-tap updates. No root required. No forced OpenAI login.
 
-> `mezchaju-v1.4.0.apk` · Android 7.0+ (ARM64) · side-load only · one stable release per build (no release spam)
+> `mezchaju-v1.5.0.apk` · Android 7.0+ (ARM64) · side-load only · one stable release per build (no release spam)
 
 ---
 
 ## ✨ What you get
 
 ### 🧭 Native dashboard (the app home)
-Open the app and land straight on the dashboard instead of a login wall:
+Open the app and land straight on a **100% native dashboard** — real Kotlin views, **no WebView, no HTML behind the home screen** (the WebView is only used when you tap **Open UI** on a service card):
 
-- **Service cards** — OpenClaw Gateway, OpenClaw Control UI, DeepSeek Harness, Claw Code (and the bundled web UI) each show live status, installed version, port and one-tap **Start / Stop / Restart**.
+- **Service cards** — OpenClaw Gateway, OpenClaw Control UI, DeepSeek Harness, Claw Code (and the bundled web UI) each show live status, installed version, and a **port** badge for servers or a **CLI** badge for agents.
+- **Ports vs CLI agents** — only *servers* bind a port: OpenClaw Gateway `18789`, Control UI `19001`, Web UI `18923` (dashboard API on `18922`). `dsh` and Claw Code are **on-demand CLI commands** (`dsh`, `claw`) — they have no port because they only run when you launch them from a terminal.
+- **Real Termux inside** — every card opens a genuine **Termux terminal**: a real POSIX PTY (`libtermux.so` from `termux-app`), real `bash`, real signals, terminal resizing and soft-keyboard input. Not a fake HTML console.
 - **Open UI in one tap** — the OpenClaw Control UI opens **already authenticated** (device token pre-wired), directly into its dashboard. No device-token prompt, no OpenAI login.
-- **Real terminal per service** — every card opens an interactive on-device terminal. Type commands, run `dsh`, launch `claw`, tail logs — anything `sh` can do.
-- **Animated, native feel** — glassmorphism cards, live status pulses, ripple buttons, bottom-sheet terminal, toasts, and a polished boot/loading animation.
+- **Animated, native feel** — smooth transitions between home, terminal and web views, live status pulses, styled service cards, and the polished boot/loading animation.
 
 ### 📁 One shared workspace
 - All agents share a single **`~/workspace`** folder (auto-created and `git init`-ed on first boot).
@@ -55,7 +56,7 @@ Paste a key in the web UI and it is persisted to `~/.mezchaju/provider.env` for 
 
 ## 📱 Install
 
-1. Download **`mezchaju-v1.4.0.apk`** from the [Releases](https://github.com/canelaslorenzo0-png/Mezchaju/releases) page.
+1. Download **`mezchaju-v1.5.0.apk`** from the [Releases](https://github.com/canelaslorenzo0-png/Mezchaju/releases) page.
 2. Allow “install unknown apps” for your browser / file manager.
 3. Open the app. First boot:
    - extracts the Linux prefix (no root), installs Node.js, Python, OpenClaw, `dsh` and Claw Code;
@@ -91,8 +92,8 @@ MainActivity ──► CodexServerManager
                                                  └─ /openui/openclaw  auto-auth redirect
 ```
 
-- The dashboard is a **zero-dependency Node server** (pure `http` + RFC 6455 WebSocket) bundled in APK assets at `android/app/src/main/assets/dashboard/`.
-- Terminals are interactive `sh -i` sessions in the shared workspace streamed over WebSocket to the built-in xterm.js shell.
+- The **native dashboard** is Kotlin views in `NativeDashboard.kt`; it talks to a **zero-dependency Node server** (`dashboard-server.js`, pure `http` + RFC 6455 WebSocket) bundled at `android/app/src/main/assets/dashboard/` for `/health` status, `/api` control actions and update checks.
+- **Real Termux terminals** live in `NativeTerminal.kt`: `com.termux.termux-app:terminal-emulator` + `terminal-view` spawn `bash` on a real PTY via `JNI.createSubprocess(...)` inside the app’s Termux prefix (`libtermux.so` packaged for all ABIs). The `dashboard-server.js` WebSocket terminal remains as a fallback for the web UI.
 - OpenClaw’s Control UI uses `auth.mode: "none"` (the current `openclaw` schema) so it opens straight into its dashboard with no device-token flow.
 
 ## 🗺 Project layout
@@ -106,7 +107,9 @@ android/app/src/main/
 │  ├─ setup-codex.sh        # first-run Linux bootstrapping
 │  └─ bionic-compat.js      # Android platform shim for Node
 ├─ java/com/codex/mobile/
-│  ├─ MainActivity.kt       # boot flow → dashboard
+│  ├─ MainActivity.kt       # boot flow → native dashboard (WebView only for Open UI)
+│  ├─ NativeDashboard.kt    # 100% native Kotlin dashboard (no HTML)
+│  ├─ NativeTerminal.kt     # real Termux PTY terminal (bash in shared workspace)
 │  ├─ CodexServerManager.kt # process lifecycle for every service
 │  ├─ BootstrapInstaller.kt # prefix extraction / first-run installs
 │  └─ CodexForegroundService.kt
@@ -115,7 +118,8 @@ docs/index.html             # public landing page (GitHub Pages)
 
 ## ✅ Status
 
-- Dashboard with per-service start/stop/restart, real terminals, shared workspace and auto-update banners — **in v1.4.0**.
+- **v1.5.0**: 100% native dashboard (no WebView home), real Termux PTY terminals per service, Codex CLI wrapper removed.
+- Dashboard with per-service start/stop/restart, real terminals, shared workspace and auto-update banners.
 - OpenClaw gateway config rewritten for the current `openclaw` schema (`auth.mode: "none"`), fixing Control UI startup/login on fresh installs.
 - Single stable release per build — no release spam.
 
