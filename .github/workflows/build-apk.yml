@@ -64,13 +64,13 @@ jobs:
         run: |
           RELEASE_DIR=android/app/build/outputs/apk/release
           APK=$(find "$RELEASE_DIR" -maxdepth 1 -name "*.apk" | head -n 1)
-          mv "$APK" "$RELEASE_DIR/mezchaju-v1.1.0.apk"
+          mv "$APK" "$RELEASE_DIR/mezchaju-v1.2.0.apk"
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
           name: mezchaju-release
-          path: android/app/build/outputs/apk/release/mezchaju-v1.1.0.apk
+          path: android/app/build/outputs/apk/release/mezchaju-v1.2.0.apk
 
       - name: Generate changelog
         if: github.ref_type == 'branch'
@@ -105,6 +105,6 @@ jobs:
             ---
             Branch: ${{ github.ref_name }}
             Built from commit ${{ github.sha }}
-          files: android/app/build/outputs/apk/release/mezchaju-v1.1.0.apk
+          files: android/app/build/outputs/apk/release/mezchaju-v1.2.0.apk
           draft: false
           prerelease: false
