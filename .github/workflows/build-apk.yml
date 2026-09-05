@@ -64,13 +64,13 @@ jobs:
         run: |
           RELEASE_DIR=android/app/build/outputs/apk/release
           APK=$(find "$RELEASE_DIR" -maxdepth 1 -name "*.apk" | head -n 1)
-          mv "$APK" "$RELEASE_DIR/mezchaju-v1.3.0.apk"
+          mv "$APK" "$RELEASE_DIR/mezchaju-v1.4.0.apk"
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
           name: mezchaju-release
-          path: android/app/build/outputs/apk/release/mezchaju-v1.3.0.apk
+          path: android/app/build/outputs/apk/release/mezchaju-v1.4.0.apk
 
       - name: Generate changelog
         if: github.ref_type == 'branch'
@@ -92,12 +92,20 @@ jobs:
         if: github.ref_type == 'branch'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v1.3.0
-          name: "Mezchaju v1.3.0"
+          tag_name: v1.4.0
+          name: "Mezchaju v1.4.0"
           body: |
             🦞 **Mezchaju** — OpenClaw + DeepSeek Harness + Claw Code on Android
 
             📱 Install the APK on any ARM64 Android 7.0+ device. No root required.
+
+            ### v1.4.0
+            - 🧭 Native dashboard: per-service start/stop/restart cards
+            - ⌨️ Real interactive terminal for every service (shared ~/workspace)
+            - 🚀 Auto-update popups when OpenClaw / DeepSeek Harness / Claw Code release upstream — update in the terminal, service restarts itself
+            - 🔓 OpenClaw Control UI opens straight into its dashboard (auth pre-wired, no login prompt)
+            - 🎨 Loading screen, dashboard animations, dead code removed
+            - 📁 All agents share one workspace folder
 
             ### Changes
             ${{ steps.changelog.outputs.notes }}
@@ -105,6 +113,6 @@ jobs:
             ---
             Branch: ${{ github.ref_name }}
             Built from commit ${{ github.sha }}
-          files: android/app/build/outputs/apk/release/mezchaju-v1.3.0.apk
+          files: android/app/build/outputs/apk/release/mezchaju-v1.4.0.apk
           draft: false
           prerelease: false
