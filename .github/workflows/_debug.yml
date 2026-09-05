@@ -1,0 +1,102 @@
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install frontend dependencies
+        working-directory: openclaw-android
+        run: npm install --no-audit --no-fund
+
+      - name: Build Vue frontend
+        working-directory: openclaw-android
+        run: npm run build:frontend
+
+      - name: Build CLI server
+        working-directory: openclaw-android
+        run: npm run build:cli
+
+      - name: Bundle server into APK assets
+        run: bash android/scripts/build-server-bundle.sh
+
+      - name: Download Termux bootstrap
+        run: bash android/scripts/download-bootstrap.sh
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: "17"
+          distribution: "temurin"
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Generate release keystore
+        run: |
+          keytool -genkeypair -v -keystore android/release.keystore \
+            -storepass anyclaw-release -alias anyclaw \
+            -keypass anyclaw-release -keyalg RSA -keysize 2048 -validity 10000 \
+            -dname "CN=AnyClaw, OU=Mobile, O=AnyClaw, L=Internet, ST=Internet, C=US"
+          printf 'storeFile=release.keystore\nstorePassword=anyclaw-release\nkeyAlias=anyclaw\nkeyPassword=anyclaw-release\n' > android/key.properties
+
+      - name: Build release APK
+        working-directory: android
+        run: ./gradlew assembleDebug --no-daemon
+
+      - name: Rename APK
+        run: |
+          RELEASE_DIR=android/app/build/outputs/apk/release
+          APK=$(find "$RELEASE_DIR" -maxdepth 1 -name "*.apk" | head -n 1)
+          echo debug-only
+
+      - name: Generate changelog
+        if: github.ref_type == 'branch'
+        id: changelog
+        run: |
+          PREV_TAG=$(git tag --sort=-v:refname | head -1)
+          if [ -n "$PREV_TAG" ]; then
+            CHANGES=$(git log "$PREV_TAG"..HEAD --pretty=format:"- %s" --reverse | head -n 60)
+          else
+            CHANGES=$(git log --pretty=format:"- %s" --reverse -20)
+          fi
+          {
+            echo "notes<<CHANGELOG_EOF"
+            echo "$CHANGES"
+            echo "CHANGELOG_EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Create Release
+        if: github.ref_type == 'branch'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ github.run_number }}
+          name: "Mezchaju v${{ github.run_number }} (${{ github.ref_name }})"
+          body: |
+            🦞 **Mezchaju** — OpenClaw + DeepSeek Harness + Claw Code on Android
+
+            📱 Install the APK on any ARM64 Android 7.0+ device. No root required.
+
+            ### Changes
+            ${{ steps.changelog.outputs.notes }}
+
+            ---
+            Branch: ${{ github.ref_name }}
+            Built from commit ${{ github.sha }}
+          files: android/app/build/outputs/apk/release/mezchaju-v1.1.0.apk
+          draft: false
+          prerelease: false

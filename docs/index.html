@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Mezchaju — OpenClaw + DeepSeek Harness + Claw Code on Android</title>
+<meta name="description" content="Mezchaju runs the OpenClaw gateway, DeepSeek Harness and Claw Code natively on Android. Bring your own provider: OpenCodeZen, OpenRouter or Xkiro." />
+<style>
+  :root {
+    --bg: #0b0f17;
+    --panel: #121826;
+    --panel2: #0f1522;
+    --line: #1f2a3f;
+    --text: #e8edf7;
+    --dim: #9aa7bd;
+    --accent: #f59e0b;
+    --accent2: #22d3ee;
+    --green: #34d399;
+    --radius: 16px;
+    --shadow: 0 20px 60px rgba(0,0,0,.45);
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html { scroll-behavior: smooth; }
+  body {
+    font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+    background:
+      radial-gradient(1000px 500px at 85% -10%, rgba(34,211,238,.14), transparent 60%),
+      radial-gradient(900px 500px at 0% 0%, rgba(245,158,11,.12), transparent 55%),
+      var(--bg);
+    color: var(--text);
+    line-height: 1.6;
+    min-height: 100vh;
+  }
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 0 24px; }
+
+  header { display: flex; align-items: center; justify-content: space-between; padding: 26px 0; }
+  .logo { font-weight: 800; font-size: 1.35rem; letter-spacing: .5px; }
+  .logo span { color: var(--accent); }
+  nav a { color: var(--dim); text-decoration: none; margin-left: 22px; font-size: .95rem; transition: color .2s; }
+  nav a:hover { color: var(--text); }
+
+  .hero { padding: 90px 0 70px; text-align: center; }
+  .hero .badge {
+    display: inline-block; padding: 7px 16px; border-radius: 999px;
+    border: 1px solid var(--line); background: var(--panel);
+    color: var(--green); font-size: .85rem; margin-bottom: 26px;
+  }
+  .hero h1 { font-size: clamp(2.6rem, 6vw, 4.4rem); line-height: 1.08; letter-spacing: -1px; }
+  .hero h1 em { font-style: normal; background: linear-gradient(90deg, var(--accent), var(--accent2)); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .hero p.sub { color: var(--dim); font-size: 1.2rem; max-width: 680px; margin: 26px auto 38px; }
+  .cta { display: flex; gap: 14px; justify-content: center; flex-wrap: wrap; }
+  .btn {
+    display: inline-block; padding: 14px 30px; border-radius: 12px;
+    font-weight: 700; text-decoration: none; font-size: 1.02rem; transition: transform .15s, box-shadow .2s;
+  }
+  .btn.primary { background: linear-gradient(135deg, var(--accent), #d97706); color: #0b0f17; box-shadow: 0 10px 30px rgba(245,158,11,.35); }
+  .btn.ghost { border: 1px solid var(--line); color: var(--text); background: var(--panel); }
+  .btn:hover { transform: translateY(-2px); }
+  .btn.primary:hover { box-shadow: 0 16px 40px rgba(245,158,11,.45); }
+
+  .hero .three { display: flex; gap: 12px; justify-content: center; margin-top: 34px; flex-wrap: wrap; }
+  .hero .three span { padding: 8px 18px; border-radius: 999px; border: 1px solid var(--line); background: var(--panel); color: var(--dim); font-size: .9rem; }
+
+  section { padding: 40px 0 70px; }
+  h2 { font-size: 2rem; margin-bottom: 12px; letter-spacing: -.5px; }
+  .lede { color: var(--dim); max-width: 620px; margin-bottom: 34px; }
+
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; }
+  .card { background: linear-gradient(180deg, var(--panel), var(--panel2)); border: 1px solid var(--line); border-radius: var(--radius); padding: 26px; transition: border-color .2s, transform .2s; }
+  .card:hover { border-color: rgba(245,158,11,.5); transform: translateY(-3px); }
+  .card .icon { font-size: 2rem; margin-bottom: 14px; }
+  .card h3 { font-size: 1.15rem; margin-bottom: 8px; }
+  .card p { color: var(--dim); font-size: .95rem; }
+  .card .tag { display: inline-block; margin-top: 14px; font-size: .78rem; color: var(--accent2); border: 1px solid var(--line); padding: 3px 10px; border-radius: 999px; }
+
+  .steps { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; counter-reset: step; }
+  .step { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 22px; position: relative; }
+  .step::before { counter-increment: step; content: counter(step, decimal-leading-zero); font-size: .8rem; color: var(--accent); display: block; margin-bottom: 10px; font-weight: 700; }
+  .step h4 { font-size: 1.02rem; margin-bottom: 6px; }
+  .step p { color: var(--dim); font-size: .9rem; }
+
+  .providers { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 6px; }
+  .provider { flex: 1 1 200px; background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 20px; text-align: center; }
+  .provider .dot { width: 12px; height: 12px; border-radius: 50%; margin: 0 auto 12px; }
+  .provider h4 { font-size: 1rem; margin-bottom: 4px; }
+  .provider p { color: var(--green); font-size: .82rem; }
+
+  .note { background: rgba(245,158,11,.07); border: 1px solid rgba(245,158,11,.3); border-radius: 14px; padding: 18px 22px; color: var(--dim); font-size: .92rem; margin-top: 30px; }
+
+  code { background: #0d1420; border: 1px solid var(--line); padding: 2px 7px; border-radius: 6px; font-family: "JetBrains Mono", ui-monospace, monospace; font-size: .85em; color: var(--accent2); }
+
+  footer { border-top: 1px solid var(--line); padding: 34px 0; color: var(--dim); font-size: .88rem; }
+  footer a { color: var(--accent2); text-decoration: none; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <div class="logo">Mezchaju<span>.</span></div>
+    <nav>
+      <a href="#harnesses">Harnesses</a>
+      <a href="#providers">Providers</a>
+      <a href="#install">Install</a>
+      <a href="https://github.com/canelaslorenzo0-png/Mezchaju">GitHub</a>
+    </nav>
+  </header>
+
+  <div class="hero">
+    <div class="badge">● Open-source · Android 7.0+ · No root</div>
+    <h1>Three coding agents.<br /><em>One phone.</em></h1>
+    <p class="sub">Mezchaju runs the <b>OpenClaw</b> gateway, <b>DeepSeek Harness</b> and <b>Claw Code</b> natively on Android — with your choice of provider: OpenCodeZen, OpenRouter or Xkiro.</p>
+    <div class="cta">
+      <a class="btn primary" href="https://github.com/canelaslorenzo0-png/Mezchaju/releases">Download APK</a>
+      <a class="btn ghost" href="https://github.com/canelaslorenzo0-png/Mezchaju">Source on GitHub</a>
+    </div>
+    <div class="three">
+      <span>🦞 OpenClaw gateway</span>
+      <span>⚡ DeepSeek Harness</span>
+      <span>🦀 Claw Code</span>
+    </div>
+  </div>
+
+  <section id="harnesses">
+    <h2>Built around real harnesses</h2>
+    <p class="lede">No smoke and mirrors — Mezchaju installs and wires together the agent stack on your device, then serves a local web UI you control.</p>
+    <div class="grid">
+      <div class="card">
+        <div class="icon">🦞</div>
+        <h3>OpenClaw gateway</h3>
+        <p>The open agent gateway: tools, MCP, multi-agent routing, control UI — running as a local WebSocket service on your device.</p>
+        <span class="tag">localhost:18789 · WS</span>
+      </div>
+      <div class="card">
+        <div class="icon">⚡</div>
+        <h3>DeepSeek Harness</h3>
+        <p><code>dsh</code> — the everything-is-a-plugin agent harness by DeepSeek AI, installed from npm and run locally, provider-agnostic.</p>
+        <span class="tag">npx @deepseek-ai/dsh</span>
+      </div>
+      <div class="card">
+        <div class="icon">🦀</div>
+        <h3>Claw Code</h3>
+        <p>The Rust-powered claw harness — installed from the ultraworkers/claw-code workspace into the on-device Linux prefix.</p>
+        <span class="tag">cargo · rust</span>
+      </div>
+    </div>
+  </section>
+
+  <section id="providers">
+    <h2>Bring your own provider</h2>
+    <p class="lede">No forced OpenAI login. Pick one of these, paste a key in the web UI, and go.</p>
+    <div class="providers">
+      <div class="provider"><div class="dot" style="background:#22d3ee"></div><h4>OpenCodeZen</h4><p>free models</p></div>
+      <div class="provider"><div class="dot" style="background:#f59e0b"></div><h4>OpenRouter</h4><p>free models</p></div>
+      <div class="provider"><div class="dot" style="background:#34d399"></div><h4>Xkiro</h4><p>free models</p></div>
+    </div>
+  </section>
+
+  <section id="install">
+    <h2>Install in three steps</h2>
+    <div class="steps">
+      <div class="step"><h4>Download the APK</h4><p>Grab <code>mezchaju-v1.1.0.apk</code> from Releases.</p></div>
+      <div class="step"><h4>Allow sideload</h4><p>Enable “install unknown apps” for your browser or file manager.</p></div>
+      <div class="step"><h4>First run</h4><p>The app sets up a full Linux prefix, installs the harnesses and starts the gateway.</p></div>
+    </div>
+    <div class="note">
+      ⚠️ First boot downloads Node.js, OpenClaw, DeepSeek Harness and Claw Code into the app’s private storage — allow a few minutes on a good connection.
+    </div>
+  </section>
+
+  <footer>
+    <p>Mezchaju — built on <a href="https://github.com/openclaw/openclaw">OpenClaw</a>, <a href="https://github.com/deepseek-ai/deepseek-harness">DeepSeek Harness</a> and <a href="https://github.com/ultraworkers/claw-code">Claw Code</a>. Not affiliated with any model provider.</p>
+  </footer>
+
+</div>
+</body>
+</html>
