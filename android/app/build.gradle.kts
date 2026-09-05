@@ -10,14 +10,21 @@ val keyProps = Properties().apply {
     if (f.exists()) f.inputStream().use { load(it) }
 }
 
-// Custom build variants (set via -P flags, driven by CI workflow inputs):
-//   -Plite=true        skip bundled web UI assets (gateway + CLI agents only)
-//   -PonlyArm64=true   package arm64-v8a native libs only
-//   -Punsigned=true    unsigned release APK (for self-signing)
-//   -PbrandName=...    override the app label (branded build)
-//   -PbrandAccent=...  override the accent hex, e.g. 22D3EE (branded build)
+// Custom build variants. Flags come from -P properties (local builds) or
+// from android/variant.properties (written by CI; space-safe for branded
+// labels like "Mezchaju Gold"):
+//   lite=true          skip bundled web UI assets (gateway + CLI agents only)
+//   onlyArm64=true     package arm64-v8a native libs only
+//   unsigned=true      unsigned release APK (for self-signing)
+//   brandName=...      override the app label (branded build)
+//   brandAccent=...    override the accent hex, e.g. 22D3EE (branded build)
+val variantProps = Properties().apply {
+    val f = rootProject.file("variant.properties")
+    if (f.exists()) f.inputStream().use { load(it) }
+}
 val prop = { name: String, default: String ->
-    (project.findProperty(name) as String?)?.takeIf { it.isNotBlank() } ?: default
+    (variantProps.getProperty(name) ?: (project.findProperty(name) as String?))
+        ?.takeIf { it.isNotBlank() } ?: default
 }
 val isLite = prop("lite", "false") == "true"
 val onlyArm64 = prop("onlyArm64", "false") == "true"

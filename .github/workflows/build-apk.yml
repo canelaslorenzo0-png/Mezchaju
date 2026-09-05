@@ -43,25 +43,33 @@ jobs:
         id: variant
         env:
           VARIANT: ${{ github.event.inputs.variant }}
-          BRAND_NAME: ${{ github.event.inputs.brand_name }}
-          BRAND_ACCENT: ${{ github.event.inputs.brand_accent }}
         run: |
           V="${VARIANT:-stable}"
-          PROPS=()
-          case "$V" in
-            lite) PROPS+=("-Plite=true") ;;
-            arm64-only) PROPS+=("-PonlyArm64=true") ;;
-            unsigned) PROPS+=("-Punsigned=true") ;;
-            branded) PROPS+=("-PbrandName=${BRAND_NAME}" "-PbrandAccent=${BRAND_ACCENT}") ;;
-          esac
           TASK=assembleRelease
           [ "$V" = "debug" ] && TASK=assembleDebug
           {
             echo "task=${TASK}"
-            echo "flags=${PROPS[*]:-}"
             echo "variant=${V}"
             echo "stamp=v1.5.0"
           } >> "$GITHUB_OUTPUT"
+
+      - name: Write Gradle variant properties
+        env:
+          BRAND_NAME: ${{ github.event.inputs.brand_name }}
+          BRAND_ACCENT: ${{ github.event.inputs.brand_accent }}
+        run: |
+          PROP=android/variant.properties
+          rm -f "$PROP"
+          case "${{ steps.variant.outputs.variant }}" in
+            lite) echo "lite=true" >> "$PROP" ;;
+            arm64-only) echo "onlyArm64=true" >> "$PROP" ;;
+            unsigned) echo "unsigned=true" >> "$PROP" ;;
+            branded)
+              echo "brandName=${BRAND_NAME}" >> "$PROP"
+              echo "brandAccent=${BRAND_ACCENT}" >> "$PROP"
+              ;;
+          esac
+          if [ -f "$PROP" ]; then cat "$PROP"; fi
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -108,7 +116,7 @@ jobs:
 
       - name: Build APK
         working-directory: android
-        run: ./gradlew ${{ steps.variant.outputs.task }} ${{ steps.variant.outputs.flags }} --no-daemon
+        run: ./gradlew ${{ steps.variant.outputs.task }} --no-daemon
 
       - name: Rename APK
         id: apk
