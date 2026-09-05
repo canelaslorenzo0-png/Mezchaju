@@ -8,6 +8,7 @@ import android.os.PowerManager
 import android.provider.Settings
 import android.util.Log
 import android.view.View
+import android.view.animation.AnimationUtils
 import android.webkit.ConsoleMessage
 import android.webkit.WebChromeClient
 import android.webkit.WebView
@@ -26,6 +27,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var loadingOverlay: View
     private lateinit var statusText: TextView
     private lateinit var statusDetail: TextView
+    private lateinit var loadingRing: android.widget.ImageView
     private lateinit var serverManager: CodexServerManager
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -36,6 +38,7 @@ class MainActivity : AppCompatActivity() {
         loadingOverlay = findViewById(R.id.loadingOverlay)
         statusText = findViewById(R.id.statusText)
         statusDetail = findViewById(R.id.statusDetail)
+        loadingRing = findViewById(R.id.loadingRing)
 
         loadingRing.startAnimation(AnimationUtils.loadAnimation(this, R.anim.ring_spin))
         for (id in arrayOf(R.id.dot1, R.id.dot2, R.id.dot3, R.id.dot4)) {
