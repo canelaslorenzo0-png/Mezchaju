@@ -92,8 +92,8 @@ jobs:
         if: github.ref_type == 'branch'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v${{ github.run_number }}
-          name: "Mezchaju v${{ github.run_number }} (${{ github.ref_name }})"
+          tag_name: v1.3.0
+          name: "Mezchaju v1.3.0"
           body: |
             🦞 **Mezchaju** — OpenClaw + DeepSeek Harness + Claw Code on Android
 
