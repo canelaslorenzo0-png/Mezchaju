@@ -35,6 +35,33 @@ class NativeDashboard(
             "deepseek-harness" to "npm install -g @deepseek-ai/dsh@latest",
             "claw-code" to "cargo install --git https://github.com/ultraworkers/claw-code --root \"\$PREFIX\"",
         )
+
+        // One-tap terminal commands per service (quick palette).
+        private val QUICK_CMDS = mapOf(
+            "openclaw-gateway" to listOf(
+                "Status" to "openclaw gateway status",
+                "Token list" to "openclaw gateway token list",
+                "Version" to "openclaw --version",
+                "Reset tokens" to "openclaw gateway token reset || true",
+            ),
+            "openclaw-control-ui" to listOf(
+                "Version" to "openclaw --version",
+                "UI assets" to "ls \"\$PREFIX/lib/node_modules/openclaw/dist/control-ui\" | head -20",
+            ),
+            "deepseek-harness" to listOf(
+                "Version" to "dsh --version",
+                "Help" to "dsh --help",
+                "Doctor" to "dsh doctor || true",
+            ),
+            "claw-code" to listOf(
+                "Version" to "claw --version",
+                "Help" to "claw --help",
+            ),
+            "mezchaju-web" to listOf(
+                "Bundle" to "ls \"\$PREFIX/lib/node_modules/codex-web-local\" | head -20",
+                "Port" to "ss -ltnp 2>/dev/null | grep 18923 || echo \"not listening\"",
+            ),
+        )
     }
 
     private val handler = Handler(Looper.getMainLooper())
@@ -52,6 +79,7 @@ class NativeDashboard(
         val status: String,
         val version: String,
         val cli: String,
+        val restarts: Int,
     )
 
     private data class Update(
@@ -150,6 +178,23 @@ class NativeDashboard(
                 setPadding(0, 6, 0, 0)
             },
         )
+
+        val utilRow1 = LinearLayout(activity).apply {
+            orientation = LinearLayout.HORIZONTAL
+            setPadding(0, dp(10), 0, 0)
+        }
+        utilRow1.addView(pillButton("📁 FILES", 0x22FFFFFF.toInt()) { activity.openFiles() })
+        utilRow1.addView(pillButton("🧩 SKILLS", 0x22FFFFFF.toInt()) { showSkillsDialog() })
+        utilRow1.addView(pillButton("⚡ PROVIDERS", 0x22FFFFFF.toInt()) { testProvidersDialog() })
+        col.addView(utilRow1)
+
+        val utilRow2 = LinearLayout(activity).apply {
+            orientation = LinearLayout.HORIZONTAL
+            setPadding(0, dp(8), 0, 0)
+        }
+        utilRow2.addView(pillButton("💾 BACKUP", 0x2200FF9D.toInt()) { activity.backupAndShare() })
+        utilRow2.addView(pillButton("♪ RESTORE", 0x2222D3EE.toInt()) { activity.pickBackupToRestore() })
+        col.addView(utilRow2)
         return col
     }
 
@@ -230,6 +275,7 @@ class NativeDashboard(
                 status = s.optString("status", "offline"),
                 version = s.optString("version", ""),
                 cli = s.optString("cli", ""),
+                restarts = s.optInt("restarts", 0),
             )
         }
         val parsedUpdates = LinkedHashMap<String, Update>()
@@ -393,6 +439,7 @@ class NativeDashboard(
         }
         chips.addView(chip(if (svc.kind == "server") "port ${svc.port}" else "CLI · ${svc.cli.ifBlank { "on-demand" }}"))
         if (svc.version.isNotBlank()) chips.addView(chip("v${svc.version}"))
+        if (svc.restarts > 0) chips.addView(chip("↻ ${svc.restarts} crash restart${if (svc.restarts == 1) "" else "s"}", true))
         val up = updates[key]
         if (up != null && up.available) chips.addView(chip("↗ v${up.latest}", true))
         card.addView(chips)
@@ -428,6 +475,22 @@ class NativeDashboard(
             activity.openTerminalForService(key, MainActivity.NATIVE_TERMINAL)
         })
         card.addView(actions)
+
+        // secondary row: logs + quick commands
+        val sec = LinearLayout(activity).apply {
+            orientation = LinearLayout.HORIZONTAL
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+            ).apply { topMargin = dp(8) }
+        }
+        sec.addView(actionButton("LOGS", 0x22FFFFFF.toInt(), 0xFFA5F3FC.toInt()) {
+            activity.openLogViewer(key)
+        })
+        sec.addView(actionButton("⌘ QUICK", 0x3322D3EE.toInt(), 0xFFA5F3FC.toInt()) {
+            showQuickCommands(key, svc)
+        })
+        card.addView(sec)
 
         // update row
         if (up != null && up.available) {
@@ -551,6 +614,111 @@ class NativeDashboard(
         Toast.makeText(activity, "✅ ${services[service]?.label ?: service} updated — restarting…", Toast.LENGTH_LONG).show()
         doAction(service, "restart")
         refreshNow()
+    }
+
+    private fun showQuickCommands(service: String, svc: Service) {
+        val items = QUICK_CMDS[service] ?: emptyList()
+        if (items.isEmpty()) {
+            Toast.makeText(activity, "No quick commands for $service", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val names = items.map { it.first }.toTypedArray()
+        AlertDialog.Builder(activity)
+            .setTitle("⌘ Quick — ${svc.label}")
+            .setItems(names) { _, which ->
+                val cmd = items[which].second
+                activity.openTerminalForService(service, MainActivity.NATIVE_QUICK, cmd)
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun showSkillsDialog() {
+        val packs = serverManager.listSkillPacks()
+        if (packs.isEmpty()) {
+            Toast.makeText(activity, "No skill packs bundled", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val installed = serverManager.installedSkills()
+        val labels = packs.map { p ->
+            val state = if (p.id in installed) "✓ installed" else "— not installed"
+            "${p.name}  ($state)\n${p.description}"
+        }.toTypedArray()
+        AlertDialog.Builder(activity)
+            .setTitle("🧩 Skill packs (installed to ~/workspace/skills)")
+            .setItems(labels) { _, which ->
+                val pack = packs[which]
+                val on = pack.id in installed
+                val next = if (on) "Remove" else "Install"
+                AlertDialog.Builder(activity)
+                    .setTitle("${pack.name}")
+                    .setMessage("${pack.description}\n\nGo ahead and $next this pack?")
+                    .setPositiveButton(next) { _, _ ->
+                        val ok = if (on) serverManager.removeSkill(pack) else serverManager.installSkill(pack)
+                        Toast.makeText(
+                            activity,
+                            if (ok) "${next}d ${pack.name}" else "${next} failed",
+                            Toast.LENGTH_SHORT,
+                        ).show()
+                    }
+                    .setNegativeButton("Cancel", null)
+                    .show()
+            }
+            .show()
+    }
+
+    private fun testProvidersDialog() {
+        val msg = AlertDialog.Builder(activity)
+            .setTitle("⚡ Testing providers…")
+            .setMessage("")
+            .setNegativeButton("Close", null)
+            .create()
+        msg.show()
+        Thread {
+            val lines = mutableListOf<String>()
+            try {
+                val conn = URL("$DASH_URL/api").openConnection() as HttpURLConnection
+                conn.requestMethod = "POST"
+                conn.doOutput = true
+                conn.connectTimeout = 5000
+                conn.readTimeout = 20000
+                conn.setRequestProperty("Content-Type", "application/json")
+                conn.outputStream.use {
+                    it.write(JSONObject().put("action", "providers-test").toString().toByteArray())
+                }
+                val r = JSONObject(conn.inputStream.bufferedReader().readText())
+                conn.disconnect()
+                if (r.optBoolean("ok")) {
+                    val arr = r.optJSONArray("providers")
+                    if (arr != null) {
+                        for (i in 0 until arr.length()) {
+                            val p = arr.optJSONObject(i)
+                            val ok = p?.optBoolean("ok") == true
+                            lines += buildString {
+                                append(if (ok) "● " else "○ ")
+                                append(p?.optString("label", "?") ?: "?")
+                                append("  ")
+                                append(
+                                    if (ok) {
+                                        "${p?.optInt("ms", 0)}ms · ${p?.optInt("models", 0)} models"
+                                    } else {
+                                        p?.optString("error", "no key") ?: "no key"
+                                    },
+                                )
+                            }
+                        }
+                    }
+                } else {
+                    lines += "Error: ${r.optString("error", "unknown")}"
+                }
+            } catch (e: Exception) {
+                lines += "Dashboard unreachable: ${e.message}"
+            }
+            activity.runOnUiThread {
+                msg.setMessage(lines.joinToString("\n").ifEmpty { "No providers configured" })
+                msg.setTitle("⚡ Provider health")
+            }
+        }.start()
     }
 
     private fun confirmResetAll() {

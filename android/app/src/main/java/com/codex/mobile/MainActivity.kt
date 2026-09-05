@@ -2,6 +2,10 @@ package com.codex.mobile
 
 import android.content.Intent
 import android.net.Uri
+import android.widget.Toast
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.FileProvider
+import java.io.File
 import android.os.Build
 import android.os.Bundle
 import android.os.PowerManager
@@ -27,6 +31,8 @@ class MainActivity : AppCompatActivity() {
         const val NATIVE_TERMINAL = "terminal"
         const val NATIVE_LAUNCH = "launch"
         const val NATIVE_UPDATE = "update"
+        const val NATIVE_QUICK = "quick"
+        const val ACTION_OPEN_TERMINAL = "com.codex.mobile.OPEN_TERMINAL"
     }
 
     private lateinit var webView: WebView
@@ -38,8 +44,36 @@ class MainActivity : AppCompatActivity() {
     private lateinit var serverManager: CodexServerManager
     private lateinit var nativeDashboard: NativeDashboard
     private lateinit var nativeTerminal: NativeTerminal
+    private lateinit var nativeLogViewer: NativeLogViewer
+    private lateinit var nativeFiles: NativeFiles
     private lateinit var webBackBar: View
     private var showingWeb = false
+
+    private val restoreLauncher = registerForActivityResult(
+        ActivityResultContracts.OpenDocument(),
+    ) { uri ->
+        if (uri == null) return@registerForActivityResult
+        Thread {
+            val ok = try {
+                val dest = File(filesDir, "restore/restore.zip")
+                dest.parentFile?.mkdirs()
+                contentResolver.openInputStream(uri)?.use { input ->
+                    dest.outputStream().use { output -> input.copyTo(output) }
+                }
+                serverManager.restoreFromZip(dest)
+            } catch (e: Exception) {
+                Log.e(TAG, "restore failed: ${e.message}")
+                false
+            }
+            runOnUiThread {
+                Toast.makeText(
+                    this,
+                    if (ok) "Restore applied — workspace & config replaced" else "Restore failed",
+                    Toast.LENGTH_LONG,
+                ).show()
+            }
+        }.start()
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -48,9 +82,11 @@ class MainActivity : AppCompatActivity() {
         serverManager = CodexServerManager(this)
         nativeDashboard = NativeDashboard(this, serverManager)
         nativeTerminal = NativeTerminal(this, serverManager)
+        nativeLogViewer = NativeLogViewer(this)
+        nativeFiles = NativeFiles(this)
 
-        // Attach the native dashboard + terminal overlays above the WebView;
-        // the WebView is only used for "Open UI" pages now.
+        // Attach native overlays above the WebView; the WebView is only
+        // used for "Open UI" pages now.
         (findViewById<ViewGroup>(android.R.id.content)).apply {
             addView(
                 nativeDashboard.view,
@@ -61,6 +97,20 @@ class MainActivity : AppCompatActivity() {
             )
             addView(
                 nativeTerminal.overlay,
+                FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                ),
+            )
+            addView(
+                nativeLogViewer.overlay,
+                FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                ),
+            )
+            addView(
+                nativeFiles.overlay,
                 FrameLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT,
                     ViewGroup.LayoutParams.MATCH_PARENT,
@@ -114,6 +164,19 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun handleIntent(intent: Intent?) {
+        when (intent?.action) {
+            ACTION_OPEN_TERMINAL -> openTerminalForService("openclaw-gateway", NATIVE_TERMINAL)
+            else -> {}
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleIntent(intent)
+    }
+
     fun openWebUrl(url: String) {
         runOnUiThread {
             showingWeb = true
@@ -138,21 +201,92 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    fun openTerminalForService(service: String, mode: String, command: String? = null) {
+    fun openTerminalForService(service: String, mode: String, command: String? = null, cwd: String? = null) {
         runOnUiThread {
             showingWeb = false
             webView.visibility = View.GONE
             webBackBar.visibility = View.GONE
             nativeDashboard.view.visibility = View.GONE
-            val cmd = when (mode) {
-                NATIVE_LAUNCH -> if (command != null) "cd \"\$HOME/workspace\"\n" + command + "\n" else null
-                NATIVE_UPDATE -> command
-                else -> null
+            nativeLogViewer.hide()
+            nativeFiles.hide()
+            when (mode) {
+                NATIVE_UPDATE -> nativeTerminal.show(service, updateCommand = command, cwd = cwd)
+                NATIVE_LAUNCH, NATIVE_QUICK -> nativeTerminal.show(service, runCommand = command, cwd = cwd)
+                else -> nativeTerminal.show(service, cwd = cwd)
             }
-            nativeTerminal.show(service, cmd)
             nativeTerminal.overlay.startAnimation(
                 AnimationUtils.loadAnimation(this, R.anim.view_slide_up),
             )
+        }
+    }
+
+    fun openTerminalAt(path: String) {
+        openTerminalForService("shell", NATIVE_TERMINAL, cwd = path)
+    }
+
+    fun openLogViewer(service: String) {
+        runOnUiThread {
+            showingWeb = false
+            webView.visibility = View.GONE
+            webBackBar.visibility = View.GONE
+            nativeDashboard.view.visibility = View.GONE
+            nativeFiles.hide()
+            nativeLogViewer.show(service)
+            nativeLogViewer.overlay.startAnimation(
+                AnimationUtils.loadAnimation(this, R.anim.view_slide_up),
+            )
+        }
+    }
+
+    fun openFiles() {
+        runOnUiThread {
+            showingWeb = false
+            webView.visibility = View.GONE
+            webBackBar.visibility = View.GONE
+            nativeDashboard.view.visibility = View.GONE
+            nativeLogViewer.hide()
+            nativeFiles.show()
+            nativeFiles.overlay.startAnimation(
+                AnimationUtils.loadAnimation(this, R.anim.view_slide_up),
+            )
+        }
+    }
+
+    fun workspacePath(): String = serverManager.workspacePath()
+
+    fun backupAndShare() {
+        Thread {
+            val zip = serverManager.backupAll()
+            runOnUiThread {
+                if (zip != null) {
+                    shareFile(zip)
+                } else {
+                    Toast.makeText(this, "Backup failed", Toast.LENGTH_LONG).show()
+                }
+            }
+        }.start()
+    }
+
+    fun shareFile(file: File) {
+        try {
+            val uri = FileProvider.getUriForFile(this, "$packageName.fileprovider", file)
+            val intent = Intent(Intent.ACTION_SEND).apply {
+                type = if (file.name.endsWith(".zip")) "application/zip" else "*/*"
+                putExtra(Intent.EXTRA_STREAM, uri)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            startActivity(Intent.createChooser(intent, "Share ${file.name}"))
+        } catch (e: Exception) {
+            Log.e(TAG, "shareFile failed: ${e.message}")
+            Toast.makeText(this, "Share failed", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    fun pickBackupToRestore() {
+        try {
+            restoreLauncher.launch(arrayOf("application/zip", "application/octet-stream", "*/*"))
+        } catch (e: Exception) {
+            Toast.makeText(this, "Restore not available", Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -190,6 +324,12 @@ class MainActivity : AppCompatActivity() {
     override fun onBackPressed() {
         if (nativeTerminal.isShowing()) {
             nativeTerminal.hide()
+            showNativeHome()
+        } else if (nativeLogViewer.isShowing()) {
+            nativeLogViewer.hide()
+            showNativeHome()
+        } else if (nativeFiles.isShowing()) {
+            nativeFiles.hide()
             showNativeHome()
         } else if (showingWeb) {
             if (webView.canGoBack()) {
@@ -317,10 +457,22 @@ class MainActivity : AppCompatActivity() {
 
         updateStatus(if (BuildConfig.LITE) "Runtime ready (lite)" else "Runtime ready")
 
-        // Step 3c: Write full-access config, provider config and default workspace
+        // Step 3c: Write full-access config, provider config, default workspace
         serverManager.ensureFullAccessConfig()
         serverManager.ensureProvidersConfig()
         serverManager.ensureDefaultWorkspace()
+
+        // Apply a backup the user picked via Restore (workspace + config).
+        val restoreZip = File(filesDir, "restore/restore.zip")
+        if (restoreZip.exists()) {
+            updateStatus("Applying restore…")
+            if (serverManager.restoreFromZip(restoreZip)) {
+                restoreZip.delete()
+            }
+        }
+
+        // Install the `mez` CLI helper into $PREFIX/bin for every terminal.
+        serverManager.installMezCli()
         nativeDashboard.startPolling()
 
         // Step 4: Start CONNECT proxy (needed for native binary DNS/TLS)
@@ -375,6 +527,9 @@ class MainActivity : AppCompatActivity() {
         if (!dashReady) {
             Log.w(TAG, "Dashboard not ready — falling back to web UI")
         }
+
+        // Step 10b: Arm the crash watchdog (restart servers that die).
+        serverManager.setWatchdogsActive(true)
 
         // Step 11: Show the native Kotlin dashboard. OpenClaw Control UI and
         // the web dashboard are one tap away from a service card and open

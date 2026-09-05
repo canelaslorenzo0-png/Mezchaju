@@ -19,18 +19,17 @@ import java.io.File
 
 /**
  * Native on-device terminal backed by the real Termux terminal emulator
- * (com.termux:terminal-view + terminal-emulator). The shell is spawned on a
- * real POSIX PTY by Termux's own native JNI code inside the app's Termux
- * prefix, so it behaves exactly like Termux — real bash, real signals,
- * resizing, soft-keyboard input.
+ * (com.termux:terminal-view + terminal-emulator). Supports multiple tabs —
+ * one real PTY session per service — all inside the shared workspace.
  */
 class NativeTerminal(
     private val activity: MainActivity,
     private val serverManager: CodexServerManager,
 ) {
-    private var session: TerminalSession? = null
-    private var currentService: String? = null
-    private var updateMode: Boolean = false
+    private val sessions = LinkedHashMap<String, TerminalSession>()
+    private val updateModes = HashMap<String, Boolean>()
+    private val cwds = HashMap<String, String>()
+    private var activeService: String? = null
 
     private val terminalViewClient = object : TerminalViewClient {
         override fun onScale(scale: Float): Float = scale
@@ -38,7 +37,7 @@ class NativeTerminal(
         override fun shouldBackButtonBeMappedToEscape(): Boolean = false
         override fun shouldEnforceCharBasedInput(): Boolean = true
         override fun shouldUseCtrlSpaceWorkaround(): Boolean = false
-        override fun isTerminalViewSelected(): Boolean = true
+        override fun isTerminalViewSelected(): Boolean = activeService != null
         override fun copyModeChanged(copyMode: Boolean) {}
         override fun onKeyDown(keyCode: Int, e: KeyEvent, session: TerminalSession?): Boolean = false
         override fun onKeyUp(keyCode: Int, e: KeyEvent): Boolean = false
@@ -65,6 +64,7 @@ class NativeTerminal(
 
     private val titleView: TextView
     private val subtitleView: TextView
+    private val tabStrip: LinearLayout
 
     val terminalView: TerminalView = TerminalView(activity, null).apply {
         setTextSize(18)
@@ -84,12 +84,15 @@ class NativeTerminal(
             ),
         )
 
-        // Top bar: service title, workspace, close button
+        // Top bar: title + tab strip + actions
         val bar = LinearLayout(activity).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(0xE6121A2B.toInt())
+            setPadding(dp(16), dp(10), dp(12), dp(8))
+        }
+        val topRow = LinearLayout(activity).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setBackgroundColor(0xE6121A2B.toInt())
-            setPadding(dp(16), dp(10), dp(12), dp(10))
         }
         val titleCol = LinearLayout(activity).apply {
             orientation = LinearLayout.VERTICAL
@@ -109,15 +112,6 @@ class NativeTerminal(
         titleCol.addView(titleView)
         titleCol.addView(subtitleView)
 
-        val closeBtn = Button(activity).apply {
-            text = "CLOSE"
-            textSize = 12f
-            isAllCaps = false
-            setTextColor(0xFFFFD9C7.toInt())
-            setBackgroundColor(0x33FF7849.toInt())
-            setPadding(dp(14), dp(6), dp(14), dp(6))
-            setOnClickListener { hide() }
-        }
         val sendExitBtn = Button(activity).apply {
             text = "EXIT"
             textSize = 12f
@@ -127,9 +121,25 @@ class NativeTerminal(
             setPadding(dp(12), dp(6), dp(12), dp(6))
             setOnClickListener { sendText("exit\n") }
         }
-        bar.addView(titleCol)
-        bar.addView(sendExitBtn)
-        bar.addView(closeBtn)
+        val closeBtn = Button(activity).apply {
+            text = "CLOSE"
+            textSize = 12f
+            isAllCaps = false
+            setTextColor(0xFFFFD9C7.toInt())
+            setBackgroundColor(0x33FF7849.toInt())
+            setPadding(dp(14), dp(6), dp(14), dp(6))
+            setOnClickListener { hide() }
+        }
+        topRow.addView(titleCol)
+        topRow.addView(sendExitBtn)
+        topRow.addView(closeBtn)
+        bar.addView(topRow)
+
+        tabStrip = LinearLayout(activity).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        bar.addView(tabStrip)
 
         val barParams = FrameLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT,
@@ -142,63 +152,143 @@ class NativeTerminal(
     fun isShowing(): Boolean = overlay.visibility == View.VISIBLE
 
     /**
-     * Open a real Termux terminal for [service] running bash inside the
-     * shared workspace. When [updateCommand] is given the command is executed
-     * in the terminal and, once the shell exits, the service is restarted via
-     * [MainActivity.onTerminalUpdateFinished].
+     * Open (or focus) a terminal tab for [service]. Pass [updateCommand] to
+     * run an update and restart the service on exit, [runCommand] to execute
+     * a quick command, or [cwd] to start the shell in another directory.
      */
-    fun show(service: String, updateCommand: String? = null) {
-        hideSafely()
-        currentService = service
-        updateMode = updateCommand != null
-
+    fun show(
+        service: String,
+        updateCommand: String? = null,
+        runCommand: String? = null,
+        cwd: String? = null,
+    ) {
         val paths = BootstrapInstaller.getPaths(activity)
-        val prefix = paths.prefixDir
-        val shell = "$prefix/bin/bash"
         val workspace = File(paths.homeDir, CodexServerManager.WORKSPACE_DIR).absolutePath
-        val env = serverManager.buildEnvironment(paths)
-            .map { (k, v) -> "$k=$v" }
-            .toTypedArray()
+        val targetCwd = cwd ?: workspace
 
-        titleView.text = "$service — Terminal"
-        subtitleView.text = "real Termux PTY · $workspace"
+        val existing = sessions[service]
+        if (existing == null) {
+            val prefix = paths.prefixDir
+            val shell = "$prefix/bin/bash"
+            val env = serverManager.buildEnvironment(paths)
+                .map { (k, v) -> "$k=$v" }
+                .toTypedArray()
+            val s = TerminalSession(shell, targetCwd, arrayOf("bash"), env, null, sessionClientFor(service))
+            sessions[service] = s
+            cwds[service] = targetCwd
+            updateModes[service] = updateCommand != null
+        } else {
+            updateModes[service] = updateCommand != null
+        }
 
-        val s = TerminalSession(shell, workspace, arrayOf("bash"), env, null, sessionClient)
-        session = s
-
-        // The overlay is attached to the activity root once in MainActivity.
         overlay.visibility = View.VISIBLE
-
-        // attachSession() spawns the shell on a PTY and initializes the emulator
-        terminalView.attachSession(s)
-        terminalView.requestFocus()
+        activateTab(service)
 
         if (updateCommand != null) {
             terminalView.postDelayed({
-                sendText("cd \"$workspace\"\n$updateCommand\necho \"--- update finished ---\"\nexit\n")
+                sendText("cd \"$targetCwd\"\n$updateCommand\necho \"--- update finished ---\"\nexit\n")
+            }, 350)
+        } else if (runCommand != null) {
+            terminalView.postDelayed({
+                sendText("cd \"$targetCwd\"\n$runCommand\n")
             }, 350)
         }
     }
 
-    fun hide() {
-        hideSafely()
-        overlay.visibility = View.GONE
+    /** Open a shell tab rooted at [cwd] (used by the workspace file browser). */
+    fun showShell(cwd: String) {
+        show("shell", cwd = cwd)
     }
 
-    private fun hideSafely() {
-        updateMode = false
-        currentService = null
-        session?.let { s ->
+    private fun activateTab(service: String) {
+        val s = sessions[service] ?: return
+        activeService = service
+        val cwd = cwds[service] ?: ""
+        titleView.text = "$service — Terminal"
+        subtitleView.text = "real Termux PTY · $cwd"
+        terminalView.attachSession(s)
+        terminalView.requestFocus()
+        renderTabs()
+    }
+
+    private fun renderTabs() {
+        tabStrip.removeAllViews()
+        for ((key, _) in sessions) {
+            val active = key == activeService
+            val tab = LinearLayout(activity).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(dp(8), dp(4), dp(6), dp(4))
+                setBackgroundColor(if (active) 0x33FF7849.toInt() else 0x0FFFFFFF.toInt())
+                background = if (active) {
+                    roundedDrawable(0xFF2A1A0E.toInt(), dp(8), 0x55FF7849.toInt(), dp(1))
+                } else {
+                    roundedDrawable(0x33FFFFFF.toInt(), dp(8), 0x1FFFFFFF.toInt(), dp(1))
+                }
+            }
+            val label = TextView(activity).apply {
+                text = key
+                textSize = 11f
+                typeface = if (active) Typeface.DEFAULT_BOLD else Typeface.DEFAULT
+                setTextColor(if (active) 0xFFFFD9C7.toInt() else 0xFFB6C2DC.toInt())
+                setPadding(dp(6), 0, dp(2), 0)
+                setOnClickListener { activateTab(key) }
+            }
+            val close = TextView(activity).apply {
+                text = " ×"
+                textSize = 13f
+                setTextColor(0xFF8FA0BF.toInt())
+                setPadding(0, 0, dp(6), 0)
+                setOnClickListener { closeTab(key) }
+            }
+            tab.addView(label)
+            tab.addView(close)
+            val lp = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+            ).apply { marginEnd = dp(6) }
+            tabStrip.addView(tab, lp)
+        }
+    }
+
+    private fun closeTab(service: String) {
+        sessions.remove(service)?.let { s ->
             try {
                 if (s.isRunning) s.finishIfRunning()
             } catch (_: Exception) {
             }
         }
-        session = null
+        updateModes.remove(service)
+        cwds.remove(service)
+        if (activeService == service) {
+            activeService = sessions.keys.firstOrNull()
+            if (activeService == null) {
+                hide()
+                return
+            }
+            activateTab(activeService!!)
+        } else {
+            renderTabs()
+        }
+    }
+
+    fun hide() {
+        for ((key, s) in sessions) {
+            try {
+                if (s.isRunning) s.finishIfRunning()
+            } catch (_: Exception) {
+            }
+            sessions.remove(key)
+        }
+        updateModes.clear()
+        cwds.clear()
+        activeService = null
+        overlay.visibility = View.GONE
     }
 
     fun sendText(text: String) {
-        val s = session ?: return
+        val key = activeService ?: return
+        val s = sessions[key] ?: return
         try {
             val data = text.toByteArray(Charsets.UTF_8)
             s.write(data, 0, data.size)
@@ -206,39 +296,50 @@ class NativeTerminal(
         }
     }
 
-    private fun dp(v: Int): Int =
-        (v * activity.resources.displayMetrics.density).toInt()
-
-    private val sessionClient = object : TerminalSessionClient {
-        override fun onTextChanged(session: TerminalSession) {}
-        override fun onTitleChanged(session: TerminalSession) {}
-        override fun onSessionFinished(session: TerminalSession) {
-            activity.runOnUiThread {
-                // Only react to the session that is currently attached; a
-                // previously closed session can finish late (SIGKILL from
-                // hideSafely) and must not restart a newer update.
-                if (session !== this@NativeTerminal.session) return@runOnUiThread
-                val svc = currentService
-                if (svc != null && updateMode) {
-                    hideSafely()
-                    activity.onTerminalUpdateFinished(svc)
-                } else {
-                    hide()
+    private fun sessionClientFor(service: String): TerminalSessionClient =
+        object : TerminalSessionClient {
+            override fun onTextChanged(session: TerminalSession) {}
+            override fun onTitleChanged(session: TerminalSession) {}
+            override fun onSessionFinished(session: TerminalSession) {
+                activity.runOnUiThread {
+                    // Only react to the session that is still registered.
+                    val svc = keyFor(session) ?: return@runOnUiThread
+                    if (updateModes[svc] == true) {
+                        updateModes.remove(svc)
+                        sessions.remove(svc)
+                        cwds.remove(svc)
+                        if (activeService == svc) activeService = sessions.keys.firstOrNull()
+                        activity.onTerminalUpdateFinished(svc)
+                    } else {
+                        if (sessions.containsKey(svc)) closeTab(svc)
+                    }
                 }
             }
+            override fun onCopyTextToClipboard(session: TerminalSession, text: String) {}
+            override fun onPasteTextFromClipboard(session: TerminalSession) {}
+            override fun onBell(session: TerminalSession) {}
+            override fun onColorsChanged(session: TerminalSession) {}
+            override fun onTerminalCursorStateChange(state: Boolean) {}
+            override fun getTerminalCursorStyle(): Int? = null
+            override fun logError(tag: String, msg: String) {}
+            override fun logWarn(tag: String, msg: String) {}
+            override fun logInfo(tag: String, msg: String) {}
+            override fun logDebug(tag: String, msg: String) {}
+            override fun logVerbose(tag: String, msg: String) {}
+            override fun logStackTraceWithMessage(tag: String, msg: String, e: Exception) {}
+            override fun logStackTrace(tag: String, e: Exception) {}
         }
-        override fun onCopyTextToClipboard(session: TerminalSession, text: String) {}
-        override fun onPasteTextFromClipboard(session: TerminalSession) {}
-        override fun onBell(session: TerminalSession) {}
-        override fun onColorsChanged(session: TerminalSession) {}
-        override fun onTerminalCursorStateChange(state: Boolean) {}
-        override fun getTerminalCursorStyle(): Int? = null
-        override fun logError(tag: String, msg: String) {}
-        override fun logWarn(tag: String, msg: String) {}
-        override fun logInfo(tag: String, msg: String) {}
-        override fun logDebug(tag: String, msg: String) {}
-        override fun logVerbose(tag: String, msg: String) {}
-        override fun logStackTraceWithMessage(tag: String, msg: String, e: Exception) {}
-        override fun logStackTrace(tag: String, e: Exception) {}
-    }
+
+    private fun keyFor(session: TerminalSession): String? =
+        sessions.entries.firstOrNull { it.value === session }?.key
+
+    private fun roundedDrawable(bg: Int, radius: Int, strokeColor: Int, strokeWidth: Int) =
+        android.graphics.drawable.GradientDrawable().apply {
+            cornerRadius = radius.toFloat()
+            setColor(bg)
+            if (strokeWidth > 0) setStroke(strokeWidth, strokeColor)
+        }
+
+    private fun dp(v: Int): Int =
+        (v * activity.resources.displayMetrics.density).toInt()
 }
