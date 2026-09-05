@@ -1339,6 +1339,7 @@ H3
         env["HTTPS_PROXY"] = "http://127.0.0.1:$PROXY_PORT"
         env["HTTP_PROXY"] = "http://127.0.0.1:$PROXY_PORT"
         env["ALL_PROXY"] = "http://127.0.0.1:$PROXY_PORT"
+        if (BuildConfig.LITE) env["MEZCHAJU_LITE"] = "1"
 
         val shell = "${paths.prefixDir}/bin/sh"
         val cmd = "exec node ${script.absolutePath} --port=$DASHBOARD_PORT"
@@ -1412,6 +1413,30 @@ H3
             echo "dashboard stopped"
         """.trimIndent())
         Log.i(TAG, "Dashboard stopped")
+    }
+
+    /**
+     * Wipe all on-device data (prefix, workspace and state) after stopping
+     * every process. Used by the debug-only reset action.
+     */
+    fun resetAllData(): Boolean {
+        try {
+            stopServer()
+        } catch (_: Exception) {}
+        val paths = BootstrapInstaller.getPaths(context)
+        var ok = true
+        for (dir in listOf(File(paths.prefixDir), File(paths.homeDir, ".mezchaju"), File(paths.homeDir, "workspace"))) {
+            try {
+                if (dir.exists()) {
+                    val deleted = dir.deleteRecursively()
+                    if (!deleted) ok = false
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "resetAllData: failed to delete ${dir.absolutePath}: ${e.message}")
+                ok = false
+            }
+        }
+        return ok
     }
 
     fun stopServer() {

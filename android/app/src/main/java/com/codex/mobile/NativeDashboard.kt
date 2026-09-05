@@ -13,6 +13,7 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
+import androidx.appcompat.app.AlertDialog
 import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
@@ -62,6 +63,17 @@ class NativeDashboard(
     private var services = emptyMap<String, Service>()
     private var updates = emptyMap<String, Update>()
     private var workspace = ""
+    private var lastJson: JSONObject? = null
+
+    // Brand accent from BuildConfig (overridden by branded builds).
+    private val accent: Int = try {
+        Color.parseColor("#${BuildConfig.BRAND_ACCENT}")
+    } catch (_: Exception) {
+        0xFFFF7849.toInt()
+    }
+
+    private fun accentA(alpha: Int): Int =
+        Color.argb(alpha, Color.red(accent), Color.green(accent), Color.blue(accent))
 
     // ── UI roots ───────────────────────────────────────────────────────────
 
@@ -104,15 +116,20 @@ class NativeDashboard(
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
         }
-        titleRow.addView(
-            TextView(activity).apply {
-                text = "🦞 Mezchaju"
-                setTextColor(0xFFF1F5FF.toInt())
-                textSize = 24f
-                typeface = Typeface.DEFAULT_BOLD
-                layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
-            },
-        )
+        val titleView = TextView(activity).apply {
+            text = "🦞 ${BuildConfig.BRAND_NAME}"
+            setTextColor(0xFFF1F5FF.toInt())
+            textSize = 24f
+            typeface = Typeface.DEFAULT_BOLD
+            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+        }
+        if (BuildConfig.DEBUG) {
+            titleView.setOnLongClickListener {
+                confirmResetAll()
+                true
+            }
+        }
+        titleRow.addView(titleView)
         val refreshBtn = pillButton("⟳ REFRESH", 0xFF22D3EE.toInt()) { refreshNow() }
         val webBtn = pillButton("WEB UI", 0xFFFF7849.toInt()) {
             activity.openWebUrl("$DASH_URL/")
@@ -123,7 +140,11 @@ class NativeDashboard(
 
         col.addView(
             TextView(activity).apply {
-                text = "Real Termux inside · one shared workspace · auto-updates"
+                text = if (BuildConfig.LITE) {
+                    "Lite · gateway + CLI agents · no web UI bundled"
+                } else {
+                    "Real Termux inside · one shared workspace · auto-updates"
+                }
                 setTextColor(0xFF9AA7BD.toInt())
                 textSize = 12.5f
                 setPadding(0, 6, 0, 0)
@@ -225,6 +246,7 @@ class NativeDashboard(
         workspace = json.optString("workspace", "")
         services = parsed
         updates = parsedUpdates
+        lastJson = json
         activity.runOnUiThread { render() }
     }
 
@@ -237,6 +259,9 @@ class NativeDashboard(
 
         renderBanners()
         renderCards()
+
+        // Keep the home-screen widget in sync with live status.
+        lastJson?.let { MezchajuWidget.publish(activity, MezchajuWidget.parseStatus(it)) }
     }
 
     private fun renderBanners() {
@@ -253,7 +278,7 @@ class NativeDashboard(
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             setPadding(dp(12), dp(10), dp(12), dp(10))
-            background = rounded(0x22FF7849.toInt(), dp(14), 0x55FF7849.toInt(), dp(1))
+            background = rounded(accentA(0x22), dp(14), accentA(0x55), dp(1))
             layoutParams = LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT,
@@ -284,7 +309,7 @@ class NativeDashboard(
                 textSize = 12f
                 isAllCaps = false
                 setTextColor(0xFF160F0A.toInt())
-                background = rounded(0xFFFF7849.toInt(), dp(12), Color.TRANSPARENT, 0)
+                background = rounded(accent, dp(12), Color.TRANSPARENT, 0)
                 setPadding(dp(12), dp(7), dp(12), dp(7))
                 setOnClickListener { activity.openTerminalForService(key, MainActivity.NATIVE_UPDATE, UPDATE_CMDS[key]) }
             },
@@ -390,12 +415,12 @@ class NativeDashboard(
             actions.addView(
                 actionButton(
                     if (online) "■ STOP" else "▶ START",
-                    if (online) 0x33F87171.toInt() else 0xFFFF7849.toInt(),
+                    if (online) 0x33F87171.toInt() else accent,
                     if (online) 0xFFFECACA.toInt() else 0xFF160F0A.toInt(),
                 ) { doAction(key, if (online) "stop" else "start") },
             )
         } else {
-            actions.addView(actionButton("▶ LAUNCH", 0xFFFF7849.toInt(), 0xFF160F0A.toInt()) {
+            actions.addView(actionButton("▶ LAUNCH", accent, 0xFF160F0A.toInt()) {
                 activity.openTerminalForService(key, MainActivity.NATIVE_LAUNCH, svc.cli)
             })
         }
@@ -451,9 +476,9 @@ class NativeDashboard(
             typeface = Typeface.MONOSPACE
             setTextColor(if (highlight) 0xFFFED7AA.toInt() else 0xFFB6C2DC.toInt())
             background = rounded(
-                if (highlight) 0x22FF7849.toInt() else 0x12FFFFFF.toInt(),
+                if (highlight) accentA(0x22) else 0x12FFFFFF.toInt(),
                 dp(9),
-                if (highlight) 0x44FF7849.toInt() else 0x1FFFFFFF.toInt(),
+                if (highlight) accentA(0x44) else 0x1FFFFFFF.toInt(),
                 dp(1),
             )
             setPadding(dp(9), dp(4), dp(9), dp(4))
@@ -526,6 +551,22 @@ class NativeDashboard(
         Toast.makeText(activity, "✅ ${services[service]?.label ?: service} updated — restarting…", Toast.LENGTH_LONG).show()
         doAction(service, "restart")
         refreshNow()
+    }
+
+    private fun confirmResetAll() {
+        AlertDialog.Builder(activity)
+            .setTitle("Reset all data?")
+            .setMessage("Debug build only. Stops every server and deletes the Linux prefix, workspace and state. The next launch is a fresh first boot.")
+            .setPositiveButton("Wipe") { _, _ ->
+                activity.resetAllData {
+                    activity.runOnUiThread {
+                        Toast.makeText(activity, "All data wiped — reopen to reinstall", Toast.LENGTH_LONG).show()
+                        activity.finishAffinity()
+                    }
+                }
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
     }
 
     private fun rounded(bg: Int, radius: Int, strokeColor: Int, strokeWidth: Int): GradientDrawable =

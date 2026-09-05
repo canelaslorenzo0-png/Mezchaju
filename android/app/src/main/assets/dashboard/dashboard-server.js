@@ -157,6 +157,12 @@ const SERVICES = {
   },
 };
 
+// Lite builds ship without the bundled web UI — drop that service entirely
+// (status, start/stop and the web UI card all disappear from the dashboard).
+if (process.env.MEZCHAJU_LITE === '1') {
+  delete SERVICES['mezchaju-web'];
+}
+
 const UPDATE_CMDS = {
   'openclaw-gateway': 'npm install -g openclaw@latest',
   'openclaw-control-ui': 'npm install -g openclaw@latest',

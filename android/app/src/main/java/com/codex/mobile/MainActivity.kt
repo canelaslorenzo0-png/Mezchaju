@@ -161,6 +161,22 @@ class MainActivity : AppCompatActivity() {
         showNativeHome()
     }
 
+    /**
+     * Debug-only wipe: stop every process and delete the prefix, workspace
+     * and state so the next launch starts a clean first boot.
+     */
+    fun resetAllData(onDone: () -> Unit) {
+        Thread {
+            try {
+                serverManager.stopServer()
+                serverManager.resetAllData()
+            } catch (e: Exception) {
+                Log.e(TAG, "resetAllData failed: ${e.message}")
+            }
+            runOnUiThread { onDone() }
+        }.start()
+    }
+
     private fun startForegroundService() {
         val intent = Intent(this, CodexForegroundService::class.java)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -292,11 +308,14 @@ class MainActivity : AppCompatActivity() {
         }
         updateStatus("Harnesses ready")
 
-        // Step 3a: Extract web UI from APK assets (every launch)
-        updateStatus("Updating web UI…")
-        serverManager.installServerBundle { msg -> updateDetail(msg) }
+        // Step 3a: Extract web UI from APK assets (every launch).
+        // Lite builds skip the bundled web UI entirely.
+        if (!BuildConfig.LITE) {
+            updateStatus("Updating web UI…")
+            serverManager.installServerBundle { msg -> updateDetail(msg) }
+        }
 
-        updateStatus("Runtime ready")
+        updateStatus(if (BuildConfig.LITE) "Runtime ready (lite)" else "Runtime ready")
 
         // Step 3c: Write full-access config, provider config and default workspace
         serverManager.ensureFullAccessConfig()
@@ -325,18 +344,22 @@ class MainActivity : AppCompatActivity() {
             serverManager.startOpenClawControlUiServer()
         }
 
-        // Step 8: Start web server
-        updateStatus("Starting server…")
-        val started = serverManager.startServer()
-        if (!started) {
-            throw RuntimeException("Failed to start server")
-        }
+        // Step 8: Start web server (skipped in lite — gateway + CLI only)
+        if (BuildConfig.LITE) {
+            updateStatus("Web UI skipped (lite build)")
+        } else {
+            updateStatus("Starting server…")
+            val started = serverManager.startServer()
+            if (!started) {
+                throw RuntimeException("Failed to start server")
+            }
 
-        // Step 9: Wait for ready
-        updateStatus("Waiting for server…")
-        val ready = serverManager.waitForServer(timeoutMs = 90_000)
-        if (!ready) {
-            throw RuntimeException("Server did not start in time")
+            // Step 9: Wait for ready
+            updateStatus("Waiting for server…")
+            val ready = serverManager.waitForServer(timeoutMs = 90_000)
+            if (!ready) {
+                throw RuntimeException("Server did not start in time")
+            }
         }
 
         // Step 10: Install + start the native dashboard (control panel with

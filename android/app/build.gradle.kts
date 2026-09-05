@@ -10,6 +10,21 @@ val keyProps = Properties().apply {
     if (f.exists()) f.inputStream().use { load(it) }
 }
 
+// Custom build variants (set via -P flags, driven by CI workflow inputs):
+//   -Plite=true        skip bundled web UI assets (gateway + CLI agents only)
+//   -PonlyArm64=true   package arm64-v8a native libs only
+//   -Punsigned=true    unsigned release APK (for self-signing)
+//   -PbrandName=...    override the app label (branded build)
+//   -PbrandAccent=...  override the accent hex, e.g. 22D3EE (branded build)
+val prop = { name: String, default: String ->
+    (project.findProperty(name) as String?)?.takeIf { it.isNotBlank() } ?: default
+}
+val isLite = prop("lite", "false") == "true"
+val onlyArm64 = prop("onlyArm64", "false") == "true"
+val unsignedBuild = prop("unsigned", "false") == "true"
+val brandName = prop("brandName", "Mezchaju")
+val brandAccent = prop("brandAccent", "FF7849")
+
 android {
     namespace = "com.codex.mobile"
     compileSdk = 35
@@ -23,6 +38,16 @@ android {
         targetSdk = 28
         versionCode = 8
         versionName = "1.5.0"
+
+        // Variant build config consumed by the app (dashboard, widget, UI).
+        buildConfigField("boolean", "LITE", if (isLite) "true" else "false")
+        buildConfigField("String", "BRAND_NAME", "\"$brandName\"")
+        buildConfigField("String", "BRAND_ACCENT", "\"$brandAccent\"")
+        resValue("string", "app_name", brandName)
+    }
+
+    buildFeatures {
+        buildConfig = true
     }
 
     signingConfigs {
@@ -38,13 +63,27 @@ android {
 
     buildTypes {
         release {
-            signingConfig = if (keyProps.isNotEmpty()) signingConfigs.getByName("release") else signingConfigs.getByName("debug")
+            signingConfig = if (unsignedBuild) {
+                null
+            } else if (keyProps.isNotEmpty()) {
+                signingConfigs.getByName("release")
+            } else {
+                signingConfigs.getByName("debug")
+            }
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+        }
+    }
+
+    if (onlyArm64) {
+        ndk {
+            // Drop x86/x86_64/armeabi-v7a native libs: smaller APK for
+            // ARM64 devices (the only supported target).
+            abiFilters += "arm64-v8a"
         }
     }
 
@@ -72,6 +111,17 @@ android {
     // Don't compress bootstrap zip or server bundle in assets
     androidResources {
         noCompress += listOf("zip", "tar.gz")
+    }
+
+    // Lite builds skip the bundled web UI + WebView fallback assets:
+    // gateway + CLI agents + native dashboard only.
+    sourceSets {
+        getByName("main") {
+            if (isLite) {
+                assets.exclude("**/server-bundle/**")
+                assets.exclude("**/web/**")
+            }
+        }
     }
 }
 
