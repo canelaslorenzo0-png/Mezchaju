@@ -7,9 +7,6 @@
     <string name="status_installing_harnesses">Installing agent harnesses…</string>
     <string name="status_starting_server">Starting server…</string>
     <string name="status_waiting_server">Waiting for server…</string>
-    <string name="api_key_title">Provider API Key</string>
-    <string name="api_key_message">Enter your API key to enable a provider (OpenCodeZen, OpenRouter, Xkiro).</string>
-    <string name="api_key_hint">key…</string>
     <string name="ok">OK</string>
     <string name="cancel">Cancel</string>
     <string name="error_title">Error</string>

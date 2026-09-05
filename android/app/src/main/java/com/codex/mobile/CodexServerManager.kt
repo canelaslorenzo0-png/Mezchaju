@@ -784,7 +784,8 @@ H3
             |    "mode": "local",
             |    "controlUi": {
             |      "enabled": true,
-            |      "allowedOrigins": ["http://127.0.0.1:$OPENCLAW_CONTROL_UI_PORT", "http://localhost:$OPENCLAW_CONTROL_UI_PORT"]
+            |      "allowedOrigins": ["http://127.0.0.1:$OPENCLAW_CONTROL_UI_PORT", "http://localhost:$OPENCLAW_CONTROL_UI_PORT"],
+            |      "allowInsecureAuth": true
             |    },
             |    "auth": {
             |      "mode": "device"
@@ -802,51 +803,82 @@ H3
         configFile.writeText(configJson)
         Log.i(TAG, "Wrote OpenClaw config to $configFile")
 
-        // Copy the Codex access_token into OpenClaw's auth-profiles.json.
-        // The profile needs: version=1, type="token", provider="openai-codex",
-        // and the canonical profile ID "openai-codex:codex-cli".
-        // Must be written to both global and agent-specific directories.
-        val authJson = File(paths.homeDir, ".codex/auth.json")
-        if (authJson.exists()) {
-            val copyScript = """
-                node -e "
-                  const fs = require('fs');
-                  const path = require('path');
-                  const auth = JSON.parse(fs.readFileSync('${'$'}HOME/.codex/auth.json','utf8'));
-                  const token = auth.tokens && auth.tokens.access_token;
-                  if (!token) { console.error('No access_token in codex auth'); process.exit(1); }
-                  const profiles = {
-                    version: 1,
-                    profiles: {
-                      'openai-codex:codex-cli': {
-                        type: 'token',
-                        provider: 'openai-codex',
-                        token: token,
-                        source: 'codex-auth',
-                        createdAt: new Date().toISOString()
-                      },
-                      'openai:codex': {
-                        type: 'token',
-                        provider: 'openai',
-                        token: token,
-                        source: 'codex-auth',
-                        createdAt: new Date().toISOString()
-                      }
-                    },
-                    order: ['openai-codex:codex-cli', 'openai:codex']
-                  };
-                  const json = JSON.stringify(profiles, null, 2);
-                  fs.writeFileSync('${'$'}HOME/.openclaw/auth-profiles.json', json);
-                  const agentDir = '${'$'}HOME/.openclaw/agents/main/agent';
-                  fs.mkdirSync(agentDir, { recursive: true });
-                  fs.writeFileSync(path.join(agentDir, 'auth-profiles.json'), json);
-                  console.log('OpenClaw auth-profiles.json written (global + agent)');
-                " 2>&1
-            """.trimIndent()
-            runInPrefix(copyScript) { Log.d(TAG, "[openclaw-auth] $it") }
-        } else {
-            Log.w(TAG, "Codex auth.json not found — OpenClaw will lack API credentials")
+        // Write provider-based auth profiles for OpenClaw (global + agent).
+        // Provider keys come from ~/.mezchaju/providers.json; users paste
+        // keys into the web UI which persists them to that file.
+        val providersFile = File(paths.homeDir, ".mezchaju/providers.json")
+        val envMap = mutableMapOf<String, String>()
+        if (providersFile.exists()) {
+            try {
+                val node = org.json.JSONObject(providersFile.readText())
+                val providers = node.optJSONObject("providers") ?: org.json.JSONObject()
+                val active = node.optString("active", "openrouter")
+                val env = providers.optJSONObject(active)?.optJSONObject("env") ?: org.json.JSONObject()
+                val keys = env.keys()
+                while (keys.hasNext()) {
+                    val k = keys.next()
+                    envMap[k] = env.optString(k)
+                }
+                Log.i(TAG, "Active provider: $active -> env=${envMap.keys}")
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to parse providers.json: ${e.message}")
+            }
         }
+
+        val profiles = org.json.JSONObject()
+        profiles.put("version", 1)
+        val profs = org.json.JSONObject()
+        if (envMap["OPENROUTER_API_KEY"].isNullOrBlank() &&
+            envMap["OPENAI_API_KEY"].isNullOrBlank() &&
+            envMap["ANTHROPIC_API_KEY"].isNullOrBlank()) {
+            Log.w(TAG, "No provider API keys configured — OpenClaw gateway will run with no model credentials")
+        }
+        if (envMap.containsKey("OPENROUTER_API_KEY")) {
+            val p = org.json.JSONObject()
+            p.put("type", "api_key")
+            p.put("provider", "openrouter")
+            p.put("apiKey", envMap["OPENROUTER_API_KEY"])
+            profs.put("openrouter:default", p)
+        }
+        if (envMap.containsKey("OPENAI_API_KEY")) {
+            val p = org.json.JSONObject()
+            p.put("type", "api_key")
+            p.put("provider", "openai")
+            p.put("apiKey", envMap["OPENAI_API_KEY"])
+            profs.put("openai:default", p)
+        }
+        if (envMap.containsKey("ANTHROPIC_API_KEY")) {
+            val p = org.json.JSONObject()
+            p.put("type", "api_key")
+            p.put("provider", "anthropic")
+            p.put("apiKey", envMap["ANTHROPIC_API_KEY"])
+            profs.put("anthropic:default", p)
+        }
+        // Always include the default provider profiles so the gateway starts cleanly.
+        if (!profs.has("openrouter:default") && !profs.has("openai:default") && !profs.has("anthropic:default")) {
+            val def = org.json.JSONObject()
+            def.put("type", "api_key")
+            def.put("provider", "openrouter")
+            def.put("apiKey", "")
+            profs.put("openrouter:default", def)
+        }
+        profiles.put("profiles", profs)
+
+        val profileJson = profiles.toString(2)
+        File(paths.homeDir, ".openclaw/auth-profiles.json").apply {
+            parentFile.mkdirs()
+            writeText(profileJson)
+        }
+        File(paths.homeDir, ".openclaw/agents/main/agent/auth-profiles.json").apply {
+            parentFile.mkdirs()
+            writeText(profileJson)
+        }
+        Log.i(TAG, "OpenClaw auth-profiles.json written (provider-based, global + agent)")
+
+        // Persist provider env for the web server process.
+        val envOut = StringBuilder()
+        for ((k, v) in envMap) envOut.append("$k=$v\n")
+        File(paths.homeDir, ".mezchaju/provider.env").writeText(envOut.toString())
     }
 
     /**
@@ -1095,46 +1127,7 @@ H3
         Log.i(TAG, "Providers config ensured at ${dir.absolutePath}/providers.json")
     }
 
-    fun installCodex(onProgress: (String) -> Unit): Boolean {
-        val paths = BootstrapInstaller.getPaths(context)
-        val prefix = paths.prefixDir
-        val npmCli = "$prefix/lib/node_modules/npm/bin/npm-cli.js"
 
-        onProgress("Installing Codex CLI…")
-        val codexCode = runInPrefix(
-            "node $npmCli install -g @openai/codex 2>&1",
-            onOutput = { onProgress(it) },
-        )
-        if (codexCode != 0) {
-            Log.e(TAG, "npm install @openai/codex failed with code $codexCode")
-            return false
-        }
-
-        ensureCodexWrapperScript()
-        return isCodexInstalled()
-    }
-
-    fun ensureCodexWrapperScript() {
-        val paths = BootstrapInstaller.getPaths(context)
-        val prefix = paths.prefixDir
-        val codexJs = File(prefix, "lib/node_modules/@openai/codex/bin/codex.js")
-        val codexBin = File(prefix, "bin/codex")
-
-        if (!codexJs.exists()) return
-        if (codexBin.exists()) return
-
-        val wrapperCmd = """
-            rm -f "$prefix/bin/codex"
-            cat > "$prefix/bin/codex" << 'WEOF'
-#!/data/user/0/com.codex.mobile/files/usr/bin/sh
-exec /data/user/0/com.codex.mobile/files/usr/bin/node /data/user/0/com.codex.mobile/files/usr/lib/node_modules/@openai/codex/bin/codex.js "${'$'}@"
-WEOF
-            chmod 700 "$prefix/bin/codex"
-            echo "codex wrapper created"
-        """.trimIndent()
-        runInPrefix(wrapperCmd)
-        Log.i(TAG, "Created codex wrapper at $codexBin")
-    }
 
     fun installServerBundle(onProgress: (String) -> Unit): Boolean {
         val paths = BootstrapInstaller.getPaths(context)
@@ -1162,50 +1155,6 @@ WEOF
      * npm refuses to install it on android (os mismatch), so we download
      * the tarball via Node.js and extract it manually.
      */
-    fun installPlatformBinary(onProgress: (String) -> Unit): Boolean {
-        val paths = BootstrapInstaller.getPaths(context)
-        val prefix = paths.prefixDir
-        val targetPkg = "$prefix/lib/node_modules/@openai/codex-linux-arm64"
-
-        onProgress("Downloading Codex native binary…")
-
-        // Use Node.js (which has working TLS) to download the npm tarball
-        val installCmd = """
-            mkdir -p "$prefix/tmp/_codex_bin" && cd "$prefix/tmp/_codex_bin" &&
-            node -e '
-              const https = require("https");
-              const fs = require("fs");
-              const url = "https://registry.npmjs.org/@openai/codex/-/codex-$CODEX_VERSION-linux-arm64.tgz";
-              const file = fs.createWriteStream("codex-bin.tgz");
-              https.get(url, (res) => {
-                if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
-                  https.get(res.headers.location, (r2) => r2.pipe(file).on("finish", () => {
-                    file.close(); console.log("Downloaded"); process.exit(0);
-                  }));
-                } else {
-                  res.pipe(file).on("finish", () => {
-                    file.close(); console.log("Downloaded"); process.exit(0);
-                  });
-                }
-              }).on("error", (e) => { console.error(e.message); process.exit(1); });
-            ' 2>&1 &&
-            tar xzf codex-bin.tgz 2>&1 &&
-            mkdir -p "$targetPkg/vendor/aarch64-unknown-linux-musl/codex" &&
-            cp package/vendor/aarch64-unknown-linux-musl/codex/codex "$targetPkg/vendor/aarch64-unknown-linux-musl/codex/codex" &&
-            cp package/package.json "$targetPkg/package.json" &&
-            chmod 700 "$targetPkg/vendor/aarch64-unknown-linux-musl/codex/codex" &&
-            rm -rf "$prefix/tmp/_codex_bin" &&
-            echo "Platform binary installed"
-        """.trimIndent()
-
-        val code = runInPrefix(installCmd, onOutput = { onProgress(it) })
-        if (code != 0) {
-            Log.e(TAG, "Platform binary install failed with code $code")
-            return false
-        }
-
-        return isPlatformBinaryInstalled()
-    }
 
     // ── Proxy ────────────────────────────────────────────────────────────────
 
@@ -1278,153 +1227,7 @@ WEOF
 
     // ── Authentication ──────────────────────────────────────────────────────
 
-    private fun codexBinPath(): String {
-        val paths = BootstrapInstaller.getPaths(context)
-        return "${paths.prefixDir}/lib/node_modules/@openai/codex-linux-arm64" +
-            "/vendor/aarch64-unknown-linux-musl/codex/codex"
-    }
 
-    fun isLoggedIn(): Boolean {
-        val output = runCapture("${codexBinPath()} login status 2>&1")
-        Log.i(TAG, "Login status: $output")
-        return !output.contains("Not logged in", ignoreCase = true)
-    }
-
-    /**
-     * Pipe an API key into `codex login --with-api-key` via stdin.
-     */
-    fun loginWithApiKey(apiKey: String): Boolean {
-        val paths = BootstrapInstaller.getPaths(context)
-        val env = buildEnvironment(paths)
-
-        val pb = ProcessBuilder(codexBinPath(), "login", "--with-api-key")
-        pb.environment().clear()
-        pb.environment().putAll(env)
-        pb.directory(File(paths.homeDir))
-        pb.redirectErrorStream(true)
-
-        val proc = pb.start()
-        proc.outputStream.bufferedWriter().use { w ->
-            w.write(apiKey)
-            w.newLine()
-            w.flush()
-        }
-
-        val reader = BufferedReader(InputStreamReader(proc.inputStream))
-        var line = reader.readLine()
-        while (line != null) {
-            Log.d(TAG, "[login] $line")
-            line = reader.readLine()
-        }
-
-        val exitCode = proc.waitFor()
-        Log.i(TAG, "codex login --with-api-key exited with code $exitCode")
-        return exitCode == 0
-    }
-
-    /**
-     * Run `codex login` (URL-based OAuth flow) using the CONNECT proxy.
-     * The native binary starts a local HTTP server for the OAuth callback,
-     * prints an auth URL, and waits for the redirect. Parses the URL from
-     * stdout and calls [onLoginUrl] so the Activity can open the browser.
-     * Blocks until login completes or fails.
-     */
-    fun loginWithUrl(
-        onLoginUrl: (url: String) -> Unit,
-        onProgress: (String) -> Unit,
-    ): Boolean {
-        val paths = BootstrapInstaller.getPaths(context)
-        val env = buildEnvironment(paths).toMutableMap()
-        env["HTTPS_PROXY"] = "http://127.0.0.1:$PROXY_PORT"
-        env["HTTP_PROXY"] = "http://127.0.0.1:$PROXY_PORT"
-
-        val pb = ProcessBuilder(codexBinPath(), "login")
-        pb.environment().clear()
-        pb.environment().putAll(env)
-        pb.directory(File(paths.homeDir))
-        pb.redirectErrorStream(true)
-
-        val proc = pb.start()
-        val reader = BufferedReader(InputStreamReader(proc.inputStream))
-
-        val urlRegex = Regex("""(https://auth\.openai\.com/\S+)""")
-        var urlSent = false
-
-        var line = reader.readLine()
-        while (line != null) {
-            val clean = line.replace(Regex("\\x1b\\[[0-9;]*m"), "").trim()
-            Log.d(TAG, "[login] $clean")
-            onProgress(clean)
-
-            if (!urlSent) {
-                urlRegex.find(clean)?.let {
-                    onLoginUrl(it.value)
-                    urlSent = true
-                }
-            }
-
-            line = reader.readLine()
-        }
-
-        val exitCode = proc.waitFor()
-        Log.i(TAG, "codex login exited with code $exitCode")
-        return exitCode == 0
-    }
-
-    // ── Health check ────────────────────────────────────────────────────────
-
-    /**
-     * Send a minimal prompt ("hi") to Codex in non-interactive (exec) mode
-     * via the CONNECT proxy. Confirms the API key is valid and the native
-     * binary can reach OpenAI.
-     */
-    fun healthCheck(onProgress: (String) -> Unit): Boolean {
-        onProgress("Sending test message…")
-
-        val paths = BootstrapInstaller.getPaths(context)
-        val env = buildEnvironment(paths).toMutableMap()
-        env["HTTPS_PROXY"] = "http://127.0.0.1:$PROXY_PORT"
-        env["HTTP_PROXY"] = "http://127.0.0.1:$PROXY_PORT"
-
-        val shell = "${paths.prefixDir}/bin/sh"
-        val cmd = "${codexBinPath()} exec --skip-git-repo-check \"say hi\" 2>&1"
-
-        val pb = ProcessBuilder(shell, "-c", cmd)
-        pb.environment().clear()
-        pb.environment().putAll(env)
-        pb.directory(File(paths.homeDir))
-        pb.redirectErrorStream(true)
-
-        val proc = pb.start()
-        val sb = StringBuilder()
-        val reader = BufferedReader(InputStreamReader(proc.inputStream))
-        var line = reader.readLine()
-        while (line != null) {
-            val clean = line.replace(Regex("\\x1b\\[[0-9;]*m"), "").trim()
-            Log.d(TAG, "[health] $clean")
-            sb.appendLine(clean)
-            onProgress(clean)
-            line = reader.readLine()
-        }
-
-        val exitCode = proc.waitFor()
-        val output = sb.toString().trim()
-        Log.i(TAG, "Health check exit=$exitCode output=$output")
-
-        if (exitCode != 0) {
-            Log.e(TAG, "Health check failed with exit code $exitCode")
-            return false
-        }
-
-        return output.isNotEmpty()
-    }
-
-    // ── Server lifecycle ────────────────────────────────────────────────────
-
-    /**
-     * Start the codex-web-local server. The CONNECT proxy must be running
-     * and authentication must have been completed first.
-     */
     fun startServer(): Boolean {
         if (isRunning) {
             Log.i(TAG, "Server already running")
@@ -1435,6 +1238,15 @@ WEOF
         val env = buildEnvironment(paths).toMutableMap()
         env["HTTPS_PROXY"] = "http://127.0.0.1:$PROXY_PORT"
         env["HTTP_PROXY"] = "http://127.0.0.1:$PROXY_PORT"
+
+        // Inject provider credentials (from ~/.mezchaju/provider.env) into the server.
+        val providerEnvFile = File(paths.homeDir, ".mezchaju/provider.env")
+        if (providerEnvFile.exists()) {
+            for (line in providerEnvFile.readLines()) {
+                val idx = line.indexOf('=')
+                if (idx > 0) env[line.substring(0, idx)] = line.substring(idx + 1)
+            }
+        }
 
         val serverScript = "${paths.prefixDir}/lib/node_modules/codex-web-local/dist-cli/index.js"
         if (!File(serverScript).exists()) {

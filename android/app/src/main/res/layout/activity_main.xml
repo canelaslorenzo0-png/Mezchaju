@@ -2,7 +2,7 @@
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="#020617">
+    android:background="@drawable/loading_bg_gradient">
 
     <WebView
         android:id="@+id/webView"
@@ -16,36 +16,91 @@
         android:layout_height="match_parent"
         android:gravity="center"
         android:orientation="vertical"
-        android:padding="32dp"
-        android:background="#020617">
+        android:padding="32dp">
 
-        <ProgressBar
-            android:id="@+id/progressBar"
-            android:layout_width="48dp"
-            android:layout_height="48dp"
-            android:indeterminate="true"
-            android:indeterminateTint="#818cf8" />
+        <!-- Animated ring with orbiting agent dots -->
+        <FrameLayout
+            android:layout_width="180dp"
+            android:layout_height="180dp"
+            android:layout_gravity="center_horizontal">
+
+            <ImageView
+                android:id="@+id/loadingRing"
+                android:layout_width="160dp"
+                android:layout_height="160dp"
+                android:layout_gravity="center"
+                android:src="@drawable/loading_ring" />
+
+            <TextView
+                android:id="@+id/agentCore"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="center"
+                android:text="🦞"
+                android:textSize="44sp" />
+
+            <View
+                android:id="@+id/dot1"
+                android:layout_width="14dp"
+                android:layout_height="14dp"
+                android:layout_gravity="top|center_horizontal"
+                android:layout_marginTop="6dp"
+                android:background="@drawable/loading_dot" />
+
+            <View
+                android:id="@+id/dot2"
+                android:layout_width="14dp"
+                android:layout_height="14dp"
+                android:layout_gravity="bottom|center_horizontal"
+                android:layout_marginBottom="6dp"
+                android:background="@drawable/loading_dot" />
+
+            <View
+                android:id="@+id/dot3"
+                android:layout_width="14dp"
+                android:layout_height="14dp"
+                android:layout_gravity="center_vertical|left"
+                android:layout_marginStart="6dp"
+                android:background="@drawable/loading_dot" />
+
+            <View
+                android:id="@+id/dot4"
+                android:layout_width="14dp"
+                android:layout_height="14dp"
+                android:layout_gravity="center_vertical|right"
+                android:layout_marginEnd="6dp"
+                android:background="@drawable/loading_dot" />
+        </FrameLayout>
 
         <TextView
             android:id="@+id/statusText"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginTop="24dp"
+            android:layout_marginTop="28dp"
             android:text="@string/status_initializing"
-            android:textColor="#94a3b8"
-            android:textSize="16sp"
+            android:textColor="#E8EDF7"
+            android:textSize="17sp"
+            android:textStyle="bold"
             android:gravity="center" />
 
         <TextView
             android:id="@+id/statusDetail"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:textColor="#64748b"
+            android:layout_marginTop="10dp"
+            android:textColor="#9AA7BD"
             android:textSize="13sp"
             android:gravity="center"
             android:visibility="gone" />
 
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="22dp"
+            android:text="OpenClaw · DeepSeek Harness · Claw Code"
+            android:textColor="#4B5870"
+            android:textSize="11sp"
+            android:letterSpacing="0.08" />
     </LinearLayout>
 
 </FrameLayout>

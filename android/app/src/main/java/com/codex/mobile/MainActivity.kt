@@ -12,8 +12,6 @@ import android.webkit.ConsoleMessage
 import android.webkit.WebChromeClient
 import android.webkit.WebView
 import android.webkit.WebViewClient
-import android.widget.EditText
-import android.widget.ProgressBar
 import android.widget.TextView
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
@@ -28,7 +26,6 @@ class MainActivity : AppCompatActivity() {
     private lateinit var loadingOverlay: View
     private lateinit var statusText: TextView
     private lateinit var statusDetail: TextView
-    private lateinit var progressBar: ProgressBar
     private lateinit var serverManager: CodexServerManager
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -39,7 +36,11 @@ class MainActivity : AppCompatActivity() {
         loadingOverlay = findViewById(R.id.loadingOverlay)
         statusText = findViewById(R.id.statusText)
         statusDetail = findViewById(R.id.statusDetail)
-        progressBar = findViewById(R.id.progressBar)
+
+        loadingRing.startAnimation(AnimationUtils.loadAnimation(this, R.anim.ring_spin))
+        for (id in arrayOf(R.id.dot1, R.id.dot2, R.id.dot3, R.id.dot4)) {
+            findViewById<View>(id).startAnimation(AnimationUtils.loadAnimation(this, R.anim.dot_pulse))
+        }
 
         serverManager = CodexServerManager(this)
 
@@ -199,11 +200,6 @@ class MainActivity : AppCompatActivity() {
         updateStatus("Updating web UI…")
         serverManager.installServerBundle { msg -> updateDetail(msg) }
 
-        // Step 3b: Install native platform binary (legacy Codex, optional)
-        if (!serverManager.isPlatformBinaryInstalled()) {
-            updateStatus("Installing optional Codex platform binary…")
-            serverManager.installPlatformBinary { msg -> updateDetail(msg) }
-        }
         updateStatus("Runtime ready")
 
         // Step 3c: Write full-access config, provider config and default workspace
@@ -252,45 +248,6 @@ class MainActivity : AppCompatActivity() {
             webView.visibility = View.VISIBLE
             webView.loadUrl("http://127.0.0.1:${CodexServerManager.SERVER_PORT}/")
         }
-    }
-
-    /**
-     * Fallback: prompt for API key if browser login fails.
-     */
-    private fun requestApiKey(): String {
-        var result = ""
-        val lock = Object()
-
-        runOnUiThread {
-            val input = EditText(this).apply {
-                hint = getString(R.string.api_key_hint)
-                setSingleLine(true)
-            }
-            val padding = (24 * resources.displayMetrics.density).toInt()
-            val container = android.widget.FrameLayout(this).apply {
-                setPadding(padding, padding / 2, padding, 0)
-                addView(input)
-            }
-
-            AlertDialog.Builder(this)
-                .setTitle(R.string.api_key_title)
-                .setMessage(R.string.api_key_message)
-                .setView(container)
-                .setCancelable(false)
-                .setPositiveButton(R.string.ok) { _, _ ->
-                    result = input.text.toString().trim()
-                    synchronized(lock) { lock.notifyAll() }
-                }
-                .setNegativeButton(R.string.cancel) { _, _ ->
-                    synchronized(lock) { lock.notifyAll() }
-                }
-                .show()
-        }
-
-        synchronized(lock) {
-            lock.wait(300_000)
-        }
-        return result
     }
 
     // ── UI helpers ──────────────────────────────────────────────────────────
