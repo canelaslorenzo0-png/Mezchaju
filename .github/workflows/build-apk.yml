@@ -185,7 +185,7 @@ jobs:
           - 🗂 **Terminal tabs** — keep one real Termux PTY per service open and switch between them; updates launch inside tabs
           - ⌘ **Quick commands** — one-tap palette per service (status, tokens, doctor, version, ports…)
           - 🔔 **Notification controls** — Start/Stop Gateway and open a terminal straight from the notification shade
-          - 🛠 **mez CLI** — `mez status`, `mez log`, `mez update`, `mez providers`, `mez skills`… installed into every terminal
+          - 🛠 **mez CLI** — \`mez status\`, \`mez log\`, \`mez update\`, \`mez providers\`, \`mez skills\`… installed into every terminal
           - 💾 **Backup & restore** — zip workspace + providers/config to share; restore from a picked backup, incl. on fresh boots
           - 📁 **Workspace file browser** — native file list, open a terminal in any folder, share or delete files
           - 🧩 **Skill packs** — install Android Dev / Git Workflow / Web Scraping guides into ~/workspace/skills from the dashboard
