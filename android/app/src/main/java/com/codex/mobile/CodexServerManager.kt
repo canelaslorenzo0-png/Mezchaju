@@ -20,15 +20,17 @@ class CodexServerManager(private val context: Context) {
         private const val TAG = "CodexServerManager"
         const val SERVER_PORT = 18923
         private const val PROXY_PORT = 18924
-        private const val CODEX_VERSION = "0.104.0"
+        const val DASHBOARD_PORT = 18922
         const val OPENCLAW_GATEWAY_PORT = 18789
         const val OPENCLAW_CONTROL_UI_PORT = 19001
+        const val WORKSPACE_DIR = "workspace"
     }
 
     private var serverProcess: Process? = null
     private var proxyProcess: Process? = null
     private var openClawGatewayProcess: Process? = null
     private var openClawControlUiProcess: Process? = null
+    private var dashboardProcess: Process? = null
 
     val isRunning: Boolean
         get() {
@@ -93,24 +95,6 @@ class CodexServerManager(private val context: Context) {
         return File(paths.prefixDir, "bin/node").exists()
     }
 
-    fun isCodexInstalled(): Boolean {
-        val paths = BootstrapInstaller.getPaths(context)
-        return File(paths.prefixDir, "lib/node_modules/@openai/codex/bin/codex.js").exists()
-    }
-
-    fun isServerBundleInstalled(): Boolean = false
-
-    /**
-     * The native Rust binary that the JS launcher delegates to.
-     * Required for `codex app-server`, `codex login`, `codex exec`, etc.
-     */
-    fun isPlatformBinaryInstalled(): Boolean {
-        val paths = BootstrapInstaller.getPaths(context)
-        return File(
-            paths.prefixDir,
-            "lib/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex/codex",
-        ).exists()
-    }
 
     // ── Installation ────────────────────────────────────────────────────────
 
@@ -768,10 +752,15 @@ H3
         openclawDir.mkdirs()
 
         val configFile = File(openclawDir, "openclaw.json")
+        // Validated against the current `openclaw` npm schema (2026.9.x):
+        //   gateway.auth.mode accepts none|token|password|trusted-proxy and
+        //   gateway.controlUi.allowInsecureAuth has been retired. auth.mode
+        //   "none" opens the Control UI straight into its dashboard with no
+        //   device-token prompt, which is exactly what Mezchaju wants.
         val configJson = """
             |{
             |  "meta": {
-            |    "lastTouchedVersion": "2026.2.21-2",
+            |    "lastTouchedVersion": "2026.9.1",
             |    "lastTouchedAt": "${java.time.Instant.now()}"
             |  },
             |  "commands": {
@@ -784,11 +773,10 @@ H3
             |    "mode": "local",
             |    "controlUi": {
             |      "enabled": true,
-            |      "allowedOrigins": ["http://127.0.0.1:$OPENCLAW_CONTROL_UI_PORT", "http://localhost:$OPENCLAW_CONTROL_UI_PORT"],
-            |      "allowInsecureAuth": true
+            |      "allowedOrigins": ["http://127.0.0.1:$OPENCLAW_CONTROL_UI_PORT", "http://localhost:$OPENCLAW_CONTROL_UI_PORT"]
             |    },
             |    "auth": {
-            |      "mode": "device"
+            |      "mode": "none"
             |    }
             |  },
             |  "agents": {
@@ -801,7 +789,7 @@ H3
             |}
         """.trimMargin()
         configFile.writeText(configJson)
-        Log.i(TAG, "Wrote OpenClaw config to $configFile")
+        Log.i(TAG, "Wrote OpenClaw config to $configFile (auth=none → Control UI opens without login)")
 
         // Write provider-based auth profiles for OpenClaw (global + agent).
         // Provider keys come from ~/.mezchaju/providers.json; users paste
@@ -1307,6 +1295,135 @@ H3
         return false
     }
 
+    // ── Dashboard (in-app control panel) ──────────────────────────────────────
+
+    /**
+     * Extract the bundled dashboard (HTML UI + dashboard-server.js + xterm +
+     * control-ui-server.js) from APK assets into the prefix, overwriting any
+     * older copy so the embedded dashboard always matches the APK build.
+     */
+    fun installDashboard(onProgress: (String) -> Unit = {}): Boolean {
+        val paths = BootstrapInstaller.getPaths(context)
+        val targetDir = File(paths.prefixDir, "lib/node_modules/mezchaju-dashboard")
+        try {
+            val assetFiles = context.assets.list("dashboard") ?: emptyArray()
+            if (assetFiles.isNotEmpty()) {
+                onProgress("Installing dashboard…")
+                targetDir.deleteRecursively()
+                targetDir.mkdirs()
+                extractAssetDir("dashboard", targetDir)
+                Log.i(TAG, "Dashboard extracted to $targetDir")
+                return true
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Dashboard asset extraction failed: ${e.message}")
+        }
+        return false
+    }
+
+    /**
+     * Start the dependency-free Node dashboard server on [DASHBOARD_PORT].
+     * It serves the UI, exposes per-service terminals and lets the user
+     * start/stop/restart servers and update OpenClaw / dsh / claw-code.
+     */
+    fun startDashboard(): Boolean {
+        val paths = BootstrapInstaller.getPaths(context)
+        val dashDir = File(paths.prefixDir, "lib/node_modules/mezchaju-dashboard")
+        val script = File(dashDir, "dashboard-server.js")
+        if (!script.exists()) return false
+
+        // Kill any orphaned dashboard from a previous run
+        runInPrefix("""
+            pidfile=${paths.homeDir}/.mezchaju/dashboard.pid
+            [ -f "${'$'}pidfile" ] && kill -9 ${'$'}(cat "${'$'}pidfile" 2>/dev/null) 2>/dev/null
+            rm -f "${'$'}pidfile" 2>/dev/null
+            for pid in ${'$'}(ls /proc 2>/dev/null | grep '^[0-9]'); do
+                if cat /proc/${'$'}pid/cmdline 2>/dev/null | tr '\0' ' ' | grep -q "dashboard-server.js"; then
+                    kill -9 ${'$'}pid 2>/dev/null
+                fi
+            done
+            echo "dashboard state cleaned"
+        """.trimIndent()) { Log.d(TAG, "[dashboard-clean] $it") }
+
+        val env = buildEnvironment(paths).toMutableMap()
+        env["HTTPS_PROXY"] = "http://127.0.0.1:$PROXY_PORT"
+        env["HTTP_PROXY"] = "http://127.0.0.1:$PROXY_PORT"
+        env["ALL_PROXY"] = "http://127.0.0.1:$PROXY_PORT"
+
+        val shell = "${paths.prefixDir}/bin/sh"
+        val cmd = "exec node ${script.absolutePath} --port=$DASHBOARD_PORT"
+
+        val pb = ProcessBuilder(shell, "-c", cmd)
+        pb.environment().clear()
+        pb.environment().putAll(env)
+        pb.directory(File(paths.homeDir))
+        pb.redirectErrorStream(true)
+
+        val proc = pb.start()
+        dashboardProcess = proc
+
+        Thread {
+            val reader = BufferedReader(InputStreamReader(proc.inputStream))
+            var line = reader.readLine()
+            while (line != null) {
+                Log.d(TAG, "[dashboard] $line")
+                line = reader.readLine()
+            }
+            Log.i(TAG, "Dashboard process exited with code: ${proc.waitFor()}")
+        }.start()
+
+        Thread.sleep(1200)
+        Log.i(TAG, "Dashboard started on port $DASHBOARD_PORT")
+        return true
+    }
+
+    fun waitForDashboard(timeoutMs: Long = 20_000): Boolean {
+        val deadline = System.currentTimeMillis() + timeoutMs
+        val url = URL("http://127.0.0.1:$DASHBOARD_PORT/health")
+        while (System.currentTimeMillis() < deadline) {
+            try {
+                val conn = url.openConnection() as HttpURLConnection
+                conn.connectTimeout = 1500
+                conn.readTimeout = 1500
+                conn.requestMethod = "GET"
+                val code = conn.responseCode
+                conn.disconnect()
+                if (code in 200..399) {
+                    Log.i(TAG, "Dashboard is ready (HTTP $code)")
+                    return true
+                }
+            } catch (_: Exception) {
+                // not ready yet
+            }
+            Thread.sleep(400)
+        }
+        Log.e(TAG, "Dashboard did not become ready within ${timeoutMs}ms")
+        return false
+    }
+
+    fun stopDashboard() {
+        val proc = dashboardProcess
+        dashboardProcess = null
+        try {
+            proc?.destroy()
+            proc?.waitFor()
+        } catch (_: Exception) {
+        }
+        val paths = BootstrapInstaller.getPaths(context)
+        runInPrefix("""
+            pidfile=${paths.homeDir}/.mezchaju/dashboard.pid
+            [ -f "${'$'}pidfile" ] && kill -9 ${'$'}(cat "${'$'}pidfile" 2>/dev/null) 2>/dev/null
+            rm -f "${'$'}pidfile" 2>/dev/null
+            for pid in ${'$'}(ls /proc 2>/dev/null | grep '^[0-9]'); do
+                if cat /proc/${'$'}pid/cmdline 2>/dev/null | tr '\0' ' ' | grep -q "dashboard-server.js"; then
+                    kill -9 ${'$'}pid 2>/dev/null
+                fi
+            done
+            echo "dashboard stopped"
+        """.trimIndent())
+        Log.i(TAG, "Dashboard stopped")
+    }
+
     fun stopServer() {
         val proc = serverProcess ?: return
         serverProcess = null
@@ -1324,6 +1441,7 @@ H3
         }
 
         stopOpenClaw()
+        stopDashboard()
         stopProxy()
         Log.i(TAG, "Server stopped")
     }
@@ -1357,14 +1475,28 @@ H3
         }
     }
 
+    /**
+     * Every service shares ONE workspace folder (~/workspace). If a legacy
+     * ~/codex folder exists from a previous install, it is migrated so all
+     * files/projects stay in a single place.
+     */
     fun ensureDefaultWorkspace() {
         val paths = BootstrapInstaller.getPaths(context)
-        val workspaceDir = File(paths.homeDir, "codex")
-        if (workspaceDir.exists()) return
-
-        workspaceDir.mkdirs()
-        runInPrefix("cd ${workspaceDir.absolutePath} && git init 2>&1")
-        Log.i(TAG, "Created default workspace at $workspaceDir")
+        val legacy = File(paths.homeDir, "codex")
+        val workspaceDir = File(paths.homeDir, WORKSPACE_DIR)
+        if (legacy.exists() && !workspaceDir.exists()) {
+            try {
+                legacy.renameTo(workspaceDir)
+                Log.i(TAG, "Migrated legacy ~/codex to $workspaceDir")
+            } catch (e: Exception) {
+                Log.w(TAG, "Workspace migration failed: ${e.message}")
+            }
+        }
+        if (!workspaceDir.exists()) {
+            workspaceDir.mkdirs()
+            runInPrefix("cd ${workspaceDir.absolutePath} && git init 2>&1")
+        }
+        Log.i(TAG, "Shared workspace ready at $workspaceDir")
     }
 
     fun ensureFullAccessConfig() {
@@ -1421,6 +1553,9 @@ H3
             "OPENSSL_CONF" to "${paths.prefixDir}/etc/tls/openssl.cnf",
             "NODE_OPTIONS" to "--openssl-config=${paths.prefixDir}/etc/tls/openssl.cnf --unhandled-rejections=warn$bionicCompatOpt",
             "CONTAINER" to "1",
+            "MEZCHAJU_WORKSPACE" to "${paths.homeDir}/$WORKSPACE_DIR",
+            "MEZCHAJU_STATE_DIR" to "${paths.homeDir}/.mezchaju",
+            "MEZCHAJU_DASHBOARD_PORT" to "$DASHBOARD_PORT",
         )
     }
 }

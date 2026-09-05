@@ -28,6 +28,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var statusText: TextView
     private lateinit var statusDetail: TextView
     private lateinit var loadingRing: android.widget.ImageView
+    private lateinit var agentCore: TextView
     private lateinit var serverManager: CodexServerManager
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -39,8 +40,11 @@ class MainActivity : AppCompatActivity() {
         statusText = findViewById(R.id.statusText)
         statusDetail = findViewById(R.id.statusDetail)
         loadingRing = findViewById(R.id.loadingRing)
+        agentCore = findViewById(R.id.agentCore)
 
+        loadingOverlay.startAnimation(AnimationUtils.loadAnimation(this, R.anim.overlay_fade))
         loadingRing.startAnimation(AnimationUtils.loadAnimation(this, R.anim.ring_spin))
+        agentCore.startAnimation(AnimationUtils.loadAnimation(this, R.anim.core_pulse))
         for (id in arrayOf(R.id.dot1, R.id.dot2, R.id.dot3, R.id.dot4)) {
             findViewById<View>(id).startAnimation(AnimationUtils.loadAnimation(this, R.anim.dot_pulse))
         }
@@ -245,11 +249,26 @@ class MainActivity : AppCompatActivity() {
             throw RuntimeException("Server did not start in time")
         }
 
-        // Step 10: Show web UI
+        // Step 10: Install + start the native dashboard (control panel with
+        // per-service terminals, start/stop, shared workspace and updates)
+        updateStatus("Installing dashboard…")
+        serverManager.installDashboard { msg -> updateDetail(msg) }
+
+        updateStatus("Starting dashboard…")
+        if (!serverManager.startDashboard()) {
+            Log.w(TAG, "Dashboard failed to start — falling back to web UI")
+        }
+        val dashReady = serverManager.waitForDashboard(timeoutMs = 20_000)
+        if (!dashReady) {
+            Log.w(TAG, "Dashboard not ready — falling back to web UI")
+        }
+
+        // Step 11: Show native dashboard (OpenClaw Control UI is one tap
+        // away from a service card and opens already authenticated)
         runOnUiThread {
             showLoading(false)
             webView.visibility = View.VISIBLE
-            webView.loadUrl("http://127.0.0.1:${CodexServerManager.SERVER_PORT}/")
+            webView.loadUrl("http://127.0.0.1:${CodexServerManager.DASHBOARD_PORT}/")
         }
     }
 
@@ -284,7 +303,10 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun updateStatus(text: String, detail: String? = null) {
-        runOnUiThread { setStatus(text, detail) }
+        runOnUiThread {
+            setStatus(text, detail)
+            statusText.startAnimation(AnimationUtils.loadAnimation(this, R.anim.status_slide))
+        }
     }
 
     private fun updateDetail(text: String) {
