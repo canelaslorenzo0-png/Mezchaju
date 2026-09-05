@@ -67,7 +67,7 @@ jobs:
           mv "$APK" "$RELEASE_DIR/mezchaju-v1.1.0.apk"
 
       - name: Upload APK artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: mezchaju-release
           path: android/app/build/outputs/apk/release/mezchaju-v1.1.0.apk
