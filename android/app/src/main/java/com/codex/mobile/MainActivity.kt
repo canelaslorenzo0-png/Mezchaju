@@ -8,11 +8,13 @@ import android.os.PowerManager
 import android.provider.Settings
 import android.util.Log
 import android.view.View
+import android.view.ViewGroup
 import android.view.animation.AnimationUtils
 import android.webkit.ConsoleMessage
 import android.webkit.WebChromeClient
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import android.widget.FrameLayout
 import android.widget.TextView
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
@@ -21,6 +23,10 @@ class MainActivity : AppCompatActivity() {
 
     companion object {
         private const val TAG = "CodexMainActivity"
+
+        const val NATIVE_TERMINAL = "terminal"
+        const val NATIVE_LAUNCH = "launch"
+        const val NATIVE_UPDATE = "update"
     }
 
     private lateinit var webView: WebView
@@ -30,10 +36,38 @@ class MainActivity : AppCompatActivity() {
     private lateinit var loadingRing: android.widget.ImageView
     private lateinit var agentCore: TextView
     private lateinit var serverManager: CodexServerManager
+    private lateinit var nativeDashboard: NativeDashboard
+    private lateinit var nativeTerminal: NativeTerminal
+    private lateinit var webBackBar: View
+    private var showingWeb = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
+
+        serverManager = CodexServerManager(this)
+        nativeDashboard = NativeDashboard(this, serverManager)
+        nativeTerminal = NativeTerminal(this, serverManager)
+
+        // Attach the native dashboard + terminal overlays above the WebView;
+        // the WebView is only used for "Open UI" pages now.
+        (findViewById<ViewGroup>(android.R.id.content)).apply {
+            addView(
+                nativeDashboard.view,
+                FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                ),
+            )
+            addView(
+                nativeTerminal.overlay,
+                FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                ),
+            )
+            nativeDashboard.view.visibility = View.GONE
+        }
 
         webView = findViewById(R.id.webView)
         loadingOverlay = findViewById(R.id.loadingOverlay)
@@ -41,6 +75,8 @@ class MainActivity : AppCompatActivity() {
         statusDetail = findViewById(R.id.statusDetail)
         loadingRing = findViewById(R.id.loadingRing)
         agentCore = findViewById(R.id.agentCore)
+        webBackBar = findViewById(R.id.webBackBar)
+        findViewById<View>(R.id.webBackBtn).setOnClickListener { showNativeHome() }
 
         loadingOverlay.startAnimation(AnimationUtils.loadAnimation(this, R.anim.overlay_fade))
         loadingRing.startAnimation(AnimationUtils.loadAnimation(this, R.anim.ring_spin))
@@ -48,8 +84,6 @@ class MainActivity : AppCompatActivity() {
         for (id in arrayOf(R.id.dot1, R.id.dot2, R.id.dot3, R.id.dot4)) {
             findViewById<View>(id).startAnimation(AnimationUtils.loadAnimation(this, R.anim.dot_pulse))
         }
-
-        serverManager = CodexServerManager(this)
 
         requestBatteryOptimizationExemption()
         startForegroundService()
@@ -59,6 +93,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
+        nativeDashboard.stopPolling()
         serverManager.stopServer()
         stopService(Intent(this, CodexForegroundService::class.java))
     }
@@ -79,6 +114,46 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    fun openWebUrl(url: String) {
+        runOnUiThread {
+            showingWeb = true
+            webView.visibility = View.VISIBLE
+            webView.bringToFront()
+            webBackBar.visibility = View.VISIBLE
+            webBackBar.bringToFront()
+            webView.loadUrl(url)
+        }
+    }
+
+    fun showNativeHome() {
+        runOnUiThread {
+            showingWeb = false
+            webView.visibility = View.GONE
+            webBackBar.visibility = View.GONE
+            nativeDashboard.view.visibility = View.VISIBLE
+        }
+    }
+
+    fun openTerminalForService(service: String, mode: String, command: String? = null) {
+        runOnUiThread {
+            showingWeb = false
+            webView.visibility = View.GONE
+            webBackBar.visibility = View.GONE
+            nativeDashboard.view.visibility = View.GONE
+            val cmd = when (mode) {
+                NATIVE_LAUNCH -> if (command != null) "cd \"\$HOME/workspace\"\n" + command + "\n" else null
+                NATIVE_UPDATE -> command
+                else -> null
+            }
+            nativeTerminal.show(service, cmd)
+        }
+    }
+
+    fun onTerminalUpdateFinished(service: String) {
+        nativeDashboard.onTerminalUpdateFinished(service)
+        showNativeHome()
+    }
+
     private fun startForegroundService() {
         val intent = Intent(this, CodexForegroundService::class.java)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -90,8 +165,15 @@ class MainActivity : AppCompatActivity() {
 
     @Deprecated("Use onBackPressedDispatcher")
     override fun onBackPressed() {
-        if (webView.canGoBack()) {
-            webView.goBack()
+        if (nativeTerminal.isShowing()) {
+            nativeTerminal.hide()
+            showNativeHome()
+        } else if (showingWeb) {
+            if (webView.canGoBack()) {
+                webView.goBack()
+            } else {
+                showNativeHome()
+            }
         } else {
             @Suppress("DEPRECATION")
             super.onBackPressed()
@@ -213,6 +295,7 @@ class MainActivity : AppCompatActivity() {
         serverManager.ensureFullAccessConfig()
         serverManager.ensureProvidersConfig()
         serverManager.ensureDefaultWorkspace()
+        nativeDashboard.startPolling()
 
         // Step 4: Start CONNECT proxy (needed for native binary DNS/TLS)
         updateStatus("Starting network proxy…")
@@ -263,12 +346,14 @@ class MainActivity : AppCompatActivity() {
             Log.w(TAG, "Dashboard not ready — falling back to web UI")
         }
 
-        // Step 11: Show native dashboard (OpenClaw Control UI is one tap
-        // away from a service card and opens already authenticated)
+        // Step 11: Show the native Kotlin dashboard. OpenClaw Control UI and
+        // the web dashboard are one tap away from a service card and open
+        // already authenticated (auth.mode none → no login prompt).
         runOnUiThread {
             showLoading(false)
-            webView.visibility = View.VISIBLE
-            webView.loadUrl("http://127.0.0.1:${CodexServerManager.DASHBOARD_PORT}/")
+            nativeDashboard.view.visibility = View.VISIBLE
+            webView.visibility = View.GONE
+            webBackBar.visibility = View.GONE
         }
     }
 

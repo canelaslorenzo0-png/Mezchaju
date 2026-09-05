@@ -113,4 +113,30 @@
             android:letterSpacing="0.08" />
     </LinearLayout>
 
+    <LinearLayout
+        android:id="@+id/webBackBar"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:padding="8dp"
+        android:background="#CC0A0F1A"
+        android:visibility="gone">
+
+        <Button
+            android:id="@+id/webBackBtn"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:minHeight="0dp"
+            android:minWidth="0dp"
+            android:paddingLeft="14dp"
+            android:paddingRight="14dp"
+            android:paddingTop="7dp"
+            android:paddingBottom="7dp"
+            android:text="◀ Dashboard"
+            android:textSize="12sp"
+            android:textColor="#FFD9C7" />
+    </LinearLayout>
+
 </FrameLayout>
