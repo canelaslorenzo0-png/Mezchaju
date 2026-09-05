@@ -40,6 +40,11 @@ npm install -g codex-web-local || {
     echo "[setup] WARNING: server UI install failed, continuing"
 }
 
+echo "[setup] Installing Rust toolchain (for Claw Code)..."
+apt-get install -y rust cargo 2>/dev/null || {
+    echo "[setup] WARNING: Rust install failed, claw-code deferred"
+}
+
 if command -v cargo >/dev/null 2>&1; then
     echo "[setup] Installing Claw Code harness..."
     cargo install --git https://github.com/ultraworkers/claw-code --root "$PREFIX" || {

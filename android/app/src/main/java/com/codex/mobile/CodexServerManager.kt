@@ -339,6 +339,45 @@ WEOF
      * NDK sysroot/multilib, and all transitive shared library deps.
      * Uses dpkg-deb manual extraction (same approach as Node.js install).
      */
+    fun ensureRustToolchain(onProgress: (String) -> Unit): Boolean {
+        val paths = BootstrapInstaller.getPaths(context)
+        val prefix = paths.prefixDir
+        val rustCheck = runCapture("${prefix}/bin/sh -c 'command -v cargo && cargo --version' 2>&1").trim()
+        if (rustCheck.contains("cargo")) {
+            onProgress("Rust already available: $rustCheck")
+            return true
+        }
+        onProgress("Installing Rust toolchain (cargo)…")
+        val installCode = runInPrefix(
+            "apt-get download --allow-unauthenticated rust cargo rust-std-aarch64-linux-android 2>&1 || " +
+                "apt-get download --allow-unauthenticated rust cargo 2>&1",
+            onOutput = { onProgress(it) },
+        )
+        if (installCode != 0) {
+            Log.w(TAG, "Rust package download failed while downloading (non-fatal)")
+        }
+        val extractCode = runInPrefix(
+            """
+            cd $prefix/tmp &&
+            mkdir -p _rust_stage &&
+            for deb in rust*.deb cargo*.deb; do
+                [ -f "${'$'}deb" ] && dpkg-deb -x "${'$'}deb" _rust_stage/ 2>&1
+            done &&
+            if [ -d "_rust_stage/data/data/com.termux/files/usr" ]; then
+                cp -a _rust_stage/data/data/com.termux/files/usr/* "$prefix/" 2>&1
+            elif [ -d "_rust_stage/usr" ]; then
+                cp -a _rust_stage/usr/* "$prefix/" 2>&1
+            fi &&
+            rm -rf _rust_stage rust*.deb cargo*.deb 2>/dev/null
+            echo "Rust extraction done"
+            """.trimIndent(),
+            onOutput = { onProgress(it) },
+        )
+        val ok = runCapture("${prefix}/bin/sh -c 'command -v cargo && cargo --version' 2>&1").trim().contains("cargo")
+        if (!ok) Log.w(TAG, "Rust toolchain still unavailable after install (claw-code will retry next boot)")
+        return ok
+    }
+
     fun installOpenClawDeps(onProgress: (String) -> Unit): Boolean {
         val paths = BootstrapInstaller.getPaths(context)
         val prefix = paths.prefixDir
@@ -745,18 +784,16 @@ H3
             |    "mode": "local",
             |    "controlUi": {
             |      "enabled": true,
-            |      "allowedOrigins": ["http://127.0.0.1:$OPENCLAW_CONTROL_UI_PORT", "http://localhost:$OPENCLAW_CONTROL_UI_PORT"],
-            |      "allowInsecureAuth": true,
-            |      "dangerouslyDisableDeviceAuth": true
+            |      "allowedOrigins": ["http://127.0.0.1:$OPENCLAW_CONTROL_UI_PORT", "http://localhost:$OPENCLAW_CONTROL_UI_PORT"]
             |    },
             |    "auth": {
-            |      "mode": "none"
+            |      "mode": "device"
             |    }
             |  },
             |  "agents": {
             |    "defaults": {
             |      "model": {
-            |        "primary": "openai-codex/gpt-5.3-codex"
+            |        "primary": "deepseek/deepseek-chat"
             |      }
             |    }
             |  }
@@ -823,7 +860,7 @@ H3
      * 3. Clear lock/pid files and client-side device-auth state.
      *
      * Combined with `dangerouslyDisableDeviceAuth: true` and
-     * `allowInsecureAuth: true` in openclaw.json, this ensures any
+     * device-token auth in openclaw.json, this ensures the
      * device can connect without "device token mismatch" errors.
      */
     fun startOpenClawGateway(): Boolean {
@@ -1001,17 +1038,16 @@ H3
             ok = false
         }
 
-        onProgress("Checking Rust for claw-code…")
-        val rust = runCapture("${prefix}/bin/sh -c 'command -v cargo || echo no-cargo' 2>&1").trim()
-        if (rust.contains("cargo")) {
-            onProgress("Installing Claw Code (cargo install)…")
+        onProgress("Installing Claw Code (cargo install)…")
+        val rustOk = ensureRustToolchain(onProgress)
+        if (rustOk) {
             val clawCode = runInPrefix(
                 "cargo install --git https://github.com/ultraworkers/claw-code --root $prefix 2>&1 || true",
                 onOutput = { onProgress(it) },
             )
             if (clawCode != 0) ok = false
         } else {
-            onProgress("Rust not available yet — claw-code will be available after first boot")
+            onProgress("Rust unavailable — claw-code will retry on next boot")
             ok = false
         }
 
@@ -1028,24 +1064,28 @@ H3
             providers.writeText(
                 """
                 {
+                  "active": "openrouter",
                   "providers": {
                     "opencodezen": {
                       "label": "OpenCodeZen",
                       "baseUrl": "https://api.opencodezen.ai/v1",
                       "models": ["free"],
-                      "apiKeyEnv": "OPENCODEZEN_API_KEY"
+                      "apiKeyEnv": "OPENCODEZEN_API_KEY",
+                      "env": { "OPENAI_BASE_URL": "https://api.opencodezen.ai/v1", "OPENAI_API_KEY": "" }
                     },
                     "openrouter": {
                       "label": "OpenRouter",
                       "baseUrl": "https://openrouter.ai/api/v1",
                       "models": ["free"],
-                      "apiKeyEnv": "OPENROUTER_API_KEY"
+                      "apiKeyEnv": "OPENROUTER_API_KEY",
+                      "env": { "OPENROUTER_API_KEY": "", "ANTHROPIC_BASE_URL": "", "OPENROUTER_MODEL_PREFIX": "openrouter/" }
                     },
                     "xkiro": {
                       "label": "Xkiro",
                       "baseUrl": "https://api.xkiro.com/v1",
                       "models": ["free"],
-                      "apiKeyEnv": "XKIRO_API_KEY"
+                      "apiKeyEnv": "XKIRO_API_KEY",
+                      "env": { "OPENAI_BASE_URL": "https://api.xkiro.com/v1", "OPENAI_API_KEY": "" }
                     }
                   }
                 }
