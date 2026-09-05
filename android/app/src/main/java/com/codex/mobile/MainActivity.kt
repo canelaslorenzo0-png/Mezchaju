@@ -118,6 +118,7 @@ class MainActivity : AppCompatActivity() {
         runOnUiThread {
             showingWeb = true
             webView.visibility = View.VISIBLE
+            webView.startAnimation(AnimationUtils.loadAnimation(this, R.anim.view_fade_in))
             webView.bringToFront()
             webBackBar.visibility = View.VISIBLE
             webBackBar.bringToFront()
@@ -131,6 +132,9 @@ class MainActivity : AppCompatActivity() {
             webView.visibility = View.GONE
             webBackBar.visibility = View.GONE
             nativeDashboard.view.visibility = View.VISIBLE
+            nativeDashboard.view.startAnimation(
+                AnimationUtils.loadAnimation(this, R.anim.view_fade_in),
+            )
         }
     }
 
@@ -146,6 +150,9 @@ class MainActivity : AppCompatActivity() {
                 else -> null
             }
             nativeTerminal.show(service, cmd)
+            nativeTerminal.overlay.startAnimation(
+                AnimationUtils.loadAnimation(this, R.anim.view_slide_up),
+            )
         }
     }
 
